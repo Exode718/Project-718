@@ -1,0 +1,57 @@
+{
+    "PECHER_THRESHOLD": 0.8,
+    "FISHING_DELAY_MIN": 5,
+    "FISHING_DELAY_MAX": 10,
+    "FISHING_START_DELAY": 5,
+    "CURSOR_RESET_DURATION": 0.2,
+    "FLOTTEUR_TIMEOUT": 16,
+    "FLOTTEUR_CHECK_INTERVAL": 0.1,
+    "KEYBINDS": {
+        "PAUSE_RESUME": "esc",
+        "MOVE_UP": "up",
+        "MOVE_DOWN": "down",
+        "MOVE_LEFT": "left",
+        "MOVE_RIGHT": "right"
+    },
+    "MAP_CREATION_KEYS": {
+        "ADD_SPOT": "5",
+        "EXIT_UP_LEFT": "7",
+        "EXIT_UP": "8",
+        "EXIT_UP_RIGHT": "9",
+        "EXIT_LEFT": "4",
+        "EXIT_RIGHT": "6",
+        "EXIT_DOWN_LEFT": "1",
+        "EXIT_DOWN": "2",
+        "EXIT_DOWN_RIGHT": "3"
+    },
+    "COMBAT": {
+        "ACTION_POINTS": 9,
+        "MOVEMENT_POINTS": 5,
+        "SPELLS": [
+            {
+                "name": "Attaque Nuageuse",
+                "key": "&",
+                "cost": 4,
+                "priority": 3,
+                "range_min": 1,
+                "range_max": 6
+            },
+            {
+                "name": "Attaque Naturelle",
+                "key": "\u00e9",
+                "cost": 3,
+                "priority": 2,
+                "range_min": 1,
+                "range_max": 8
+            },
+            {
+                "name": "Flamiche",
+                "key": "\"",
+                "cost": 2,
+                "priority": 1,
+                "range_min": 1,
+                "range_max": 8
+            }
+        ]
+    }
+}
