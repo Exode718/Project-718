@@ -15,11 +15,14 @@ class Grid:
         self.v_vec = (0, 0)
         self.cells = {}
         self.walkable_cells = set()
+        self.los_transparent_cells = set()
         self.tactical_colors = [
             (185, 206, 113),  # #B9CE71 (Case marchable standard)
             (171, 191, 105),  # #ABBF69 (Case marchable standard, autre teinte)
             (144, 168, 61),   # #90A83D (Icône de sortie sur case marchable)
-            (137, 160, 57)    # #89A039 (Icône de sortie sur case marchable, autre teinte)
+            (137, 160, 57),   # #89A039 (Icône de sortie sur case marchable, autre teinte)
+            (180, 183, 112),  # #B4B770 (Nouvelle teinte de case marchable)
+            (167, 170, 104)   # #A7AA68 (Nouvelle teinte de case marchable, plus sombre)
         ]
         self.load_config()
 
@@ -157,23 +160,57 @@ class Grid:
             return
 
         self.walkable_cells.clear()
+        self.los_transparent_cells.clear()
         
         if screenshot is None:
             screenshot = pyautogui.screenshot()
 
+        # Pré-calculer les déplacements en spirale pour le scan de proximité
+        spiral_moves = [(0, 0)]
+        for i in range(1, 4): # Rayon de 3 pixels
+            for dx in range(-i, i + 1):
+                spiral_moves.append((dx, i))
+                spiral_moves.append((dx, -i))
+            for dy in range(-i + 1, i):
+                spiral_moves.append((i, dy))
+                spiral_moves.append((-i, dy))
+
+        black_color_threshold = 30
+
         for cell_coord, screen_pos in self.cells.items():
-            if 0 <= screen_pos[0] < screenshot.width and 0 <= screen_pos[1] < screenshot.height:
-                pixel_color = screenshot.getpixel(screen_pos)
-            else:
-                continue
+            found_walkable = False
 
-            if sum(pixel_color) < 50:
-                continue
-
-            for tac_color in self.tactical_colors:
-                if all(abs(pixel_color[i] - tac_color[i]) <= color_tolerance for i in range(3)):
-                    self.walkable_cells.add(cell_coord)
+            # --- Étape 1: Chercher une couleur de case marchable ---
+            for dx, dy in spiral_moves:
+                scan_x, scan_y = screen_pos[0] + dx, screen_pos[1] + dy
+                if not (0 <= scan_x < screenshot.width and 0 <= scan_y < screenshot.height):
+                    continue
+                pixel_color = screenshot.getpixel((scan_x, scan_y))
+                if sum(pixel_color) < 50: # Ignorer les pixels très sombres
+                    continue
+                for tac_color in self.tactical_colors:
+                    if all(abs(pixel_color[i] - tac_color[i]) <= color_tolerance for i in range(3)):
+                        self.walkable_cells.add(cell_coord)
+                        self.los_transparent_cells.add(cell_coord)
+                        found_walkable = True
+                        break
+                if found_walkable:
                     break
+            
+            # --- Étape 2: Si la case n'est pas marchable, vérifier si elle bloque la vue ---
+            if not found_walkable:
+                has_black = False
+                for dx, dy in spiral_moves:
+                    scan_x, scan_y = screen_pos[0] + dx, screen_pos[1] + dy
+                    if not (0 <= scan_x < screenshot.width and 0 <= scan_y < screenshot.height):
+                        continue
+                    pixel_color = screenshot.getpixel((scan_x, scan_y))
+                    # Si on trouve un pixel suffisamment noir, la ligne de vue passe
+                    if sum(pixel_color) < black_color_threshold:
+                        self.los_transparent_cells.add(cell_coord)
+                        has_black = True
+                        break
+
         log(f"[Grille] Cartographie terminée : {len(self.walkable_cells)} cases marchables trouvées.")
 
     def get_neighbors(self, cell):
@@ -217,8 +254,8 @@ class Grid:
                 err += dx
                 y0 += sy
         
-        for cell in line_cells[1:-1]:
-            if cell not in self.walkable_cells:
+        for cell in line_cells[1:-1]: # On vérifie les cases entre le départ et l'arrivée
+            if cell not in self.los_transparent_cells:
                 return False
         return True
 
