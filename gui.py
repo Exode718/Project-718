@@ -10,8 +10,9 @@ import keyboard
 from PIL import Image, ImageTk
 import os
 from main import main_bot_logic, request_map_change, get_map_coordinates, load_map_data, create_map_interactively, find_exit_with_fallback, wait_for_map_change, get_next_map_coords
-from utils import set_pause_state, set_stop_state, is_stop_requested
+from utils import set_pause_state, set_stop_state, is_stop_requested, is_fight_started
 from grid import grid_instance
+from fight import combat_state
 
 
 class GuiApp(tk.Tk):
@@ -56,14 +57,12 @@ class GuiApp(tk.Tk):
         self.settings_tab = ttk.Frame(self.notebook, style='TFrame')
         self.combat_tab = ttk.Frame(self.notebook, style='TFrame')
         self.path_tab = ttk.Frame(self.notebook, style='TFrame')
-        self.map_tab = ttk.Frame(self.notebook, style='TFrame')
-        self.debug_tab = ttk.Frame(self.notebook, style='TFrame')
+        self.map_tab = ttk.Frame(self.notebook, style='TFrame') # Onglet unifié
 
         self.notebook.add(self.bot_tab, text='Bot')
         self.notebook.add(self.map_tab, text='Map')
         self.notebook.add(self.path_tab, text='Déplacement')
         self.notebook.add(self.combat_tab, text='Combat')
-        self.notebook.add(self.debug_tab, text='Debug')
         self.notebook.add(self.settings_tab, text='Configuration')
 
         # --- Widgets ---
@@ -83,11 +82,16 @@ class GuiApp(tk.Tk):
         # --- Case à cocher pour le combat auto ---
         self.auto_combat_var = tk.BooleanVar()
         self.auto_combat_check = ttk.Checkbutton(control_frame, text="Combat Auto", variable=self.auto_combat_var)
-        self.auto_combat_check.grid(row=0, column=3, padx=5)
+        self.auto_combat_check.grid(row=0, column=3, padx=(5,0))
+
+        # --- Case à cocher pour "Combat Only" ---
+        self.combat_only_var = tk.BooleanVar()
+        self.combat_only_check = ttk.Checkbutton(control_frame, text="Combat Only", variable=self.combat_only_var)
+        self.combat_only_check.grid(row=0, column=4, padx=(0,5))
         
-        control_frame.columnconfigure(4, weight=1)
+        control_frame.columnconfigure(5, weight=1)
         self.status_label = ttk.Label(control_frame, text="Statut : Prêt", anchor='e')
-        self.status_label.grid(row=0, column=4, sticky='e', padx=5)
+        self.status_label.grid(row=0, column=5, sticky='e', padx=5)
 
 
         self.log_widget = scrolledtext.ScrolledText(self.bot_tab, state='disabled', bg=light_grey_bg, fg=text_color, font=("Consolas", 9), relief='flat')
@@ -173,11 +177,13 @@ class GuiApp(tk.Tk):
         map_controls_frame.pack(side=tk.BOTTOM, pady=(4, 10), fill=tk.X, padx=5)
         map_controls_frame.columnconfigure(2, weight=1)
 
-        ttk.Button(map_controls_frame, text="Ajouter/Éditer", command=self.add_or_edit_map).grid(row=0, column=0, padx=5)
+        ttk.Button(map_controls_frame, text="Ajouter/Éditer Map", command=self.add_or_edit_map).grid(row=0, column=0, padx=5)
         ttk.Button(map_controls_frame, text="Rafraîchir", command=self.draw_map).grid(row=0, column=1, padx=5)
+        self.calibrate_grid_button = ttk.Button(map_controls_frame, text="Étalonner Grille", command=self.calibrate_grid)
+        self.calibrate_grid_button.grid(row=0, column=2, padx=10)
 
         self.map_status_label = ttk.Label(map_controls_frame, text="Statut : Prêt", anchor='e')
-        self.map_status_label.grid(row=0, column=2, sticky='e', padx=5)
+        self.map_status_label.grid(row=0, column=3, sticky='e', padx=5)
 
         # --- Widgets de l'onglet Combat ---
         combat_stats_frame = ttk.Frame(self.combat_tab)
@@ -224,16 +230,6 @@ class GuiApp(tk.Tk):
         spells_scrollbar.pack(side=tk.RIGHT, fill='y')
         self.spells_tree.configure(yscrollcommand=spells_scrollbar.set)
 
-        # --- Widgets de l'onglet Debug ---
-        self.debug_canvas = tk.Canvas(self.debug_tab, bg=light_grey_bg, highlightthickness=0)
-        self.debug_canvas.pack(pady=5, padx=5, fill='both', expand=True)
-
-        debug_controls_frame = ttk.Frame(self.debug_tab)
-        debug_controls_frame.pack(side=tk.BOTTOM, pady=(4, 10), fill=tk.X, padx=5)
-        ttk.Button(debug_controls_frame, text="Afficher la Grille", command=self.draw_debug_grid).pack(side=tk.LEFT, padx=5)
-        self.calibrate_grid_button = ttk.Button(debug_controls_frame, text="Étalonner Grille", command=self.calibrate_grid)
-        self.calibrate_grid_button.pack(side=tk.LEFT, padx=10)
-
 
         # --- Bot state ---
         self.bot_thread = None
@@ -246,6 +242,8 @@ class GuiApp(tk.Tk):
         self.closing_on_stop = False
         self.reloading = False
         self.map_items = {} # Pour garder en mémoire les éléments dessinés sur la carte (points, sorties)
+        self.in_combat_view = False
+        self.in_placement_phase = False
 
         self.setup_global_hotkeys()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -450,128 +448,122 @@ class GuiApp(tk.Tk):
         if messagebox.askyesno(f"{mode_text.capitalize()} la carte", f"Voulez-vous {mode_text} les données de la carte {coords} ?"):
             threading.Thread(target=create_map_interactively, args=(coords, None, map_exists), daemon=True).start()
 
-    def draw_map(self):
-        """Dessine la carte sur le canevas, avec l'image de fond et capture auto."""
+    def draw_map(self, in_combat=None):
+        """
+        Affiche la carte et la grille. L'affichage s'adapte automatiquement
+        si le bot est en combat ou en phase de récolte.
+        """
+        if in_combat is not None:
+            self.in_combat_view = in_combat
+
         self.map_canvas.delete("all")
-        self.map_items.clear()
         canvas_width, canvas_height = self.map_canvas.winfo_width(), self.map_canvas.winfo_height()
-        
+
         if canvas_width <= 1 or canvas_height <= 1:
             self.after(100, self.draw_map)
             return
-        self.map_canvas.unbind("<Button-1>")
-
-        coords = get_map_coordinates()
-        if not coords:
-            self.map_canvas.create_text(canvas_width/2, canvas_height/2, text="Impossible de lire la carte.", fill="white", font=("Calibri", 12))
-            return
-
-        self.map_canvas.create_text(10, 10, text=f"Carte: {coords}", fill="white", font=("Calibri", 12, "bold"), anchor="nw", tags="map_text")
-
-        try:
-            map_data = load_map_data(coords)
-            
-            bg_path = f"Maps/{coords}.png"
-            if not os.path.exists(bg_path):
-                self.log_to_widget(f"[GUI] Aucune image de fond pour {coords}. Capture automatique...")
-                game_area = (0, 24, 1348, 808)
-                screenshot = pyautogui.screenshot(region=game_area)
-                screenshot.save(bg_path)
-                self.log_to_widget(f"[GUI] Fond de carte sauvegardé : {bg_path}")
-
-            img = Image.open(bg_path)
-            
-            scale = min(canvas_width / img.width, canvas_height / img.height)
-            
-            if img.width <= 0 or img.height <= 0:
-                raise ValueError("Les dimensions de l'image de fond sont invalides.")
-
-            scaled_w, scaled_h = int(img.width * scale), int(img.height * scale)
-            img_resized = img.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
-            self.map_bg_photo = ImageTk.PhotoImage(img_resized)
-            
-            offset_x = (canvas_width - scaled_w) / 2
-            offset_y = (canvas_height - scaled_h) / 2
-            self.map_canvas.create_image(offset_x, offset_y, image=self.map_bg_photo, anchor='nw')
-
-            for cell in map_data.get("cells", []):
-                x = (cell['x'] * scale) + offset_x
-                y = ((cell['y'] - 24) * scale) + offset_y
-                item_id = self.map_canvas.create_oval(x - 5, y - 5, x + 5, y + 5, fill="cyan", outline="cyan", tags="map_item")
-                self.map_canvas.tag_bind(item_id, "<Button-1>", lambda e, t="cell", c=cell: self.on_map_item_click(e, t, c))
-                self.map_items[f"cell_{cell['x']}_{cell['y']}"] = item_id
-
-            for direction, pos in map_data.get("exits", {}).items():
-                x = (pos['x'] * scale) + offset_x
-                y = ((pos['y'] - 24) * scale) + offset_y
-                item_id = self.map_canvas.create_rectangle(x - 6, y - 6, x + 6, y + 6, fill="orange", outline="orange", tags="map_item")
-                self.map_canvas.tag_bind(item_id, "<Button-1>", lambda e, t="exit", c=direction: self.on_map_item_click(e, t, c))
-                text_id = self.map_canvas.create_text(x, y + 10, text=direction, fill="white", font=("Calibri", 7))
-                self.map_canvas.tag_bind(text_id, "<Button-1>", lambda e, t="exit", c=direction: self.on_map_item_click(e, t, c))
-
-        except FileNotFoundError:
-            self.map_canvas.create_text(canvas_width/2, canvas_height/2, text=f"Aucune donnée pour la carte {coords}.", fill="white", font=("Calibri", 12))
-        except Exception as e:
-            self.log_to_widget(f"[Erreur GUI] Erreur inattendue lors du dessin de la carte : {e}")
-            self.map_canvas.create_text(canvas_width/2, canvas_height/2, text=f"Erreur d'affichage pour {coords}.", fill="red", font=("Calibri", 12))
-        
-        self.map_canvas.tag_raise("map_text")
-
-    def highlight_spot(self, cell, color):
-        """Change la couleur d'un point de pêche sur la carte."""
-        item_key = f"cell_{cell['x']}_{cell['y']}"
-        item_id = self.map_items.get(item_key)
-        if item_id:
-            self.map_canvas.itemconfig(item_id, fill=color, outline=color)
-
-    def on_map_item_click(self, event, item_type, item_data):
-        """Gère le clic sur un élément de la carte."""
-        canvas = event.widget
-        if self.selected_map_item:
-            canvas.itemconfig(self.selected_map_item, outline="cyan" if canvas.type(self.selected_map_item) == "oval" else "orange")
-
-        self.selected_map_item = canvas.find_closest(event.x, event.y)[0]
-        canvas.itemconfig(self.selected_map_item, outline="yellow")
-        
-        canvas.focus_set()
-        canvas.bind("<Delete>", lambda e, t=item_type, d=item_data: self.delete_map_item(t, d))
-
-    def calibrate_grid(self):
-        """Lance le processus d'étalonnage de la grille dans un thread séparé."""
-        threading.Thread(target=grid_instance.calibrate, daemon=True).start()
-
-    def draw_debug_grid(self):
-        """Affiche la grille de combat et les obstacles sur le canevas de débogage."""
-        self.debug_canvas.delete("all")
         
         if not grid_instance.is_calibrated:
             messagebox.showerror("Erreur", "La grille n'est pas étalonnée. Veuillez l'étalonner depuis l'onglet 'Debug'.")
             return
         
         full_screenshot = pyautogui.screenshot()
-        grid_instance.map_obstacles(screenshot=full_screenshot)
+        if self.in_combat_view:
+            grid_instance.map_obstacles(screenshot=full_screenshot)
 
         game_area = (0, 24, 1348, 808)
         game_screenshot = full_screenshot.crop(game_area)
-        
-        canvas_width = self.debug_canvas.winfo_width()
-        canvas_height = self.debug_canvas.winfo_height()
         
         scale = min(canvas_width / game_screenshot.width, canvas_height / game_screenshot.height)
         scaled_w, scaled_h = int(game_screenshot.width * scale), int(game_screenshot.height * scale)
         
         img_resized = game_screenshot.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
-        self.debug_bg_photo = ImageTk.PhotoImage(img_resized)
-        self.debug_canvas.create_image(0, 0, image=self.debug_bg_photo, anchor='nw')
+        self.map_bg_photo = ImageTk.PhotoImage(img_resized)
+        self.map_canvas.create_image(0, 0, image=self.map_bg_photo, anchor='nw')
 
+        # Récupérer les spots de pêche pour l'affichage hors combat
+        map_data = {}
+        fishing_spots_coords = set()
+        if not self.in_combat_view:
+            coords = get_map_coordinates()
+            if coords:
+                try:
+                    map_data = load_map_data(coords)
+                    # Dessiner les sorties de carte
+                    for direction, pos in map_data.get("exits", {}).items():
+                        relative_x = pos['x'] - game_area[0]
+                        relative_y = pos['y'] - game_area[1]
+                        canvas_x = relative_x * scale
+                        canvas_y = relative_y * scale
+                        self.map_canvas.create_rectangle(canvas_x - 4, canvas_y - 4, canvas_x + 4, canvas_y + 4, fill="orange", outline="orange")
+                        self.map_canvas.create_text(canvas_x, canvas_y + 10, text=direction, fill="white", font=("Calibri", 7))
+
+
+                    # Convertir les coordonnées écran en coordonnées de grille
+                    for cell_data in map_data.get("cells", []):
+                        grid_cell = grid_instance.get_cell_from_screen_coords(cell_data['x'], cell_data['y'])
+                        if grid_cell:
+                            fishing_spots_coords.add(grid_cell)
+                except FileNotFoundError:
+                    pass # Pas grave si le fichier n'existe pas encore
+
+        # Dessiner la grille
         for cell_coord, screen_pos in grid_instance.cells.items():
             if game_area[0] <= screen_pos[0] < game_area[2] and game_area[1] <= screen_pos[1] < game_area[3]:
                 relative_x = screen_pos[0] - game_area[0]
                 relative_y = screen_pos[1] - game_area[1]
                 canvas_x = relative_x * scale
                 canvas_y = relative_y * scale
-                color = "lime" if cell_coord in grid_instance.walkable_cells else "red"
-                self.debug_canvas.create_oval(canvas_x - 2, canvas_y - 2, canvas_x + 2, canvas_y + 2, fill=color, outline=color)
+
+                fill_color = ""
+                outline_color = "white"
+
+                if self.in_combat_view:
+                    outline_color = "lime" if cell_coord in grid_instance.walkable_cells else "red"
+                elif cell_coord in fishing_spots_coords:
+                    fill_color = "orange" # Remplir les cases de pêche
+
+                # Pendant la phase de placement ET le combat, on affiche les cases de départ pour le debug
+                if self.in_combat_view:
+                    if cell_coord in combat_state.possible_player_starts:
+                        fill_color = "white"
+                        outline_color = "white"
+                    elif cell_coord in combat_state.possible_monster_starts:
+                        fill_color = "black"
+                        outline_color = "black"
+
+                    # Pendant la phase de placement, on sur-couleur les monstres détectés et on change le contour
+                    if self.in_placement_phase:
+                        if cell_coord in combat_state.monster_positions:
+                            fill_color = "red" # Rouge pour les monstres détectés
+                    
+                    # Si la case n'est pas une case de départ, on utilise la couleur de la grille de combat
+                    if not fill_color:
+                        outline_color = "lime" if cell_coord in grid_instance.walkable_cells else "red"
+                
+                width = 2 if fill_color and self.in_placement_phase else 1 # Contour plus épais pour les cases de départ en placement
+                cell_w, cell_h = 97 * scale, 50 * scale
+                points = [
+                    canvas_x, canvas_y - cell_h / 2,  # Sommet haut
+                    canvas_x + cell_w / 2, canvas_y,  # Sommet droit
+                    canvas_x, canvas_y + cell_h / 2,  # Sommet bas
+                    canvas_x - cell_w / 2, canvas_y   # Sommet gauche
+                ]
+                self.map_canvas.create_polygon(points, outline=outline_color, fill=fill_color, width=width)
+
+    def highlight_spot(self, cell, color):
+        """Change la couleur d'un point de pêche sur la carte."""
+        # Cette fonction n'est plus utilisée avec le nouveau système de grille, mais on la garde au cas où.
+        pass
+
+    def on_map_item_click(self, event, item_type, item_data):
+        """Gère le clic sur un élément de la carte."""
+        # Cette fonction est conservée pour une future utilisation (ex: éditeur de map visuel)
+        pass
+
+    def calibrate_grid(self):
+        """Lance le processus d'étalonnage de la grille dans un thread séparé."""
+        threading.Thread(target=grid_instance.calibrate, daemon=True).start()
 
     def delete_map_item(self, item_type, item_data):
         """Supprime un élément de la carte après confirmation."""

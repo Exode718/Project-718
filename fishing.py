@@ -125,7 +125,7 @@ def run_fishing_cycle(map_coords, map_data, gui_app, target_direction):
         if is_fight_started():
             log("COMBAT DÉTECTÉ (agression) ! Lancement de la gestion du combat.")
             auto_combat_enabled = gui_app.auto_combat_var.get()
-            handle_fight(auto_combat_enabled)
+            handle_fight(auto_combat_enabled, gui_app)
             log("Reprise du cycle de pêche après le combat. Redémarrage du scan sur la carte actuelle.")
             return run_fishing_cycle(map_coords, map_data, gui_app, target_direction)
 
@@ -151,7 +151,7 @@ def run_fishing_cycle(map_coords, map_data, gui_app, target_direction):
 
                 if is_fight_started():
                     auto_combat_enabled = gui_app.auto_combat_var.get()
-                    handle_fight(auto_combat_enabled)
+                    handle_fight(auto_combat_enabled, gui_app)
                     log("Reprise du cycle de pêche après le combat. Redémarrage du scan sur la carte actuelle.")
                     return run_fishing_cycle(map_coords, map_data, gui_app, target_direction)
             else:
