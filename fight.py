@@ -36,20 +36,23 @@ MONSTER_FEET_CIRCLE_COLOR = ([25, 100, 100], [45, 255, 255])  # Orange/Marron (p
 
 # --- Fonctions de combat ---
 
-def find_on_screen(template_path, threshold=0.8):
+def find_on_screen(template_path, threshold=0.8, bbox=None):
     """Trouve la première occurrence d'un template sur l'écran."""
     try:
-        screen = ImageGrab.grab()
+        screen = ImageGrab.grab(bbox=bbox)
         screen_gray = cv2.cvtColor(np.array(screen), cv2.COLOR_BGR2GRAY)
         template = cv2.imread(template_path, 0)
         if template is None: return None
         
         res = cv2.matchTemplate(screen_gray, template, cv2.TM_CCOEFF_NORMED)
         loc = np.where(res >= threshold)
-        
+
         if len(loc[0]) > 0:
             h, w = template.shape
-            return (loc[1][0] + w // 2, loc[0][0] + h // 2)
+            # Adjust coordinates if bbox was used
+            offset_x = bbox[0] if bbox else 0
+            offset_y = bbox[1] if bbox else 0
+            return (loc[1][0] + w // 2 + offset_x, loc[0][0] + h // 2 + offset_y)
     except Exception as e:
         log(f"[Combat] Erreur lors de la recherche de {template_path}: {e}")
     return None
@@ -100,8 +103,8 @@ def find_entities_on_grid(color_ranges, min_area=100, bbox=None):
 
         for cell_coord, screen_pos in grid_instance.cells.items():
             # On scanne une petite zone décalée vers le bas
-            y_offset = 20
-            scan_size = 5
+            y_offset = 15 # Réduction de l'offset pour être plus proche du centre
+            scan_size = 7 # Augmentation de la zone de scan
             x_center, y_center = screen_pos[0] - offset_x, screen_pos[1] - offset_y + y_offset
             
             x_start, y_start = x_center - scan_size, y_center - scan_size
@@ -191,6 +194,9 @@ def handle_fight_auto(gui_app=None): # sourcery skip: low-code-quality
     combat_state.reset()
     if gui_app: gui_app.in_placement_phase = True
     log("[Combat Auto] Lancement de la gestion de combat.")
+    
+    log("[Combat Auto] Déplacement de la souris pour ne pas gêner le scan.")
+    pyautogui.moveTo(1, pyautogui.size().height - 1) # Bouge la souris en bas à gauche
 
     if not grid_instance.is_calibrated:
         log("[Combat Auto] Erreur : La grille de combat n'est pas étalonnée. Passage en mode manuel.")
@@ -239,20 +245,15 @@ def handle_fight_auto(gui_app=None): # sourcery skip: low-code-quality
             pyautogui.click(screen_pos)
             time.sleep(0.5)
 
-    ready_button = find_on_screen("Images/button_ready.png")
-    if ready_button:
-        log("[Combat Auto] Clic sur 'Prêt'.")
-        pyautogui.click(ready_button)
+    # On cherche le bouton "Prêt" uniquement dans la partie basse de l'écran pour éviter les faux positifs
+    ready_button_area = (400, 600, 1000, 800)
+    ready_button = find_on_screen("Images/button_ready.png", bbox=ready_button_area)
+    log("[Combat Auto] Appui sur 'F1' pour être prêt.")
+    pyautogui.press('f1')
 
     # Attente pour laisser le bandeau "Le combat commence" disparaître
     log("[Combat Auto] Attente du début du combat...")
     if gui_app: gui_app.in_placement_phase = False
-
-    # Clic sur le bouton timeline pour la masquer
-    timeline_button = find_on_screen(TIMELINE_ANCHOR_IMAGE, threshold=0.8)
-    if timeline_button:
-        log("[Combat Auto] Clic sur le bouton timeline pour la masquer.")
-        pyautogui.click(timeline_button)
 
     time.sleep(2.5)
     while not check_and_close_fight_end_popup():
@@ -323,9 +324,8 @@ def handle_fight_auto(gui_app=None): # sourcery skip: low-code-quality
 
             if not action_taken:
                 log("[Combat Auto] Aucune action possible. Fin du tour.")
-                end_turn_button = find_on_screen(END_TURN_BUTTON_IMAGE)
-                if end_turn_button:
-                    pyautogui.click(end_turn_button)
+                log("[Combat Auto] Appui sur 'F1' pour passer le tour.")
+                pyautogui.press('f1')
                 break
         time.sleep(2)
 

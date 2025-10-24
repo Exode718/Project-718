@@ -173,6 +173,8 @@ class GuiApp(tk.Tk):
         self.map_canvas = tk.Canvas(self.map_tab, bg=light_grey_bg, highlightthickness=0)
         self.map_canvas.pack(pady=5, padx=5, fill='both', expand=True)
 
+        self.map_canvas.bind("<KeyPress-Delete>", self.delete_selected_map_item)
+
         map_controls_frame = ttk.Frame(self.map_tab)
         map_controls_frame.pack(side=tk.BOTTOM, pady=(4, 10), fill=tk.X, padx=5)
         map_controls_frame.columnconfigure(2, weight=1)
@@ -484,26 +486,25 @@ class GuiApp(tk.Tk):
         # Récupérer les spots de pêche pour l'affichage hors combat
         map_data = {}
         fishing_spots_coords = set()
+        exit_spots_coords = set()
         if not self.in_combat_view:
             coords = get_map_coordinates()
             if coords:
                 try:
                     map_data = load_map_data(coords)
-                    # Dessiner les sorties de carte
-                    for direction, pos in map_data.get("exits", {}).items():
-                        relative_x = pos['x'] - game_area[0]
-                        relative_y = pos['y'] - game_area[1]
-                        canvas_x = relative_x * scale
-                        canvas_y = relative_y * scale
-                        self.map_canvas.create_rectangle(canvas_x - 4, canvas_y - 4, canvas_x + 4, canvas_y + 4, fill="orange", outline="orange")
-                        self.map_canvas.create_text(canvas_x, canvas_y + 10, text=direction, fill="white", font=("Calibri", 7))
-
-
-                    # Convertir les coordonnées écran en coordonnées de grille
+                    
+                    # Convertir les coordonnées écran des spots de pêche en coordonnées de grille
                     for cell_data in map_data.get("cells", []):
                         grid_cell = grid_instance.get_cell_from_screen_coords(cell_data['x'], cell_data['y'])
                         if grid_cell:
                             fishing_spots_coords.add(grid_cell)
+
+                    # Convertir les coordonnées écran des sorties en coordonnées de grille
+                    for direction, pos_data in map_data.get("exits", {}).items():
+                        grid_cell = grid_instance.get_cell_from_screen_coords(pos_data['x'], pos_data['y'])
+                        if grid_cell:
+                            exit_spots_coords.add(grid_cell)
+
                 except FileNotFoundError:
                     pass # Pas grave si le fichier n'existe pas encore
 
@@ -516,11 +517,16 @@ class GuiApp(tk.Tk):
                 canvas_y = relative_y * scale
 
                 fill_color = ""
-                outline_color = "white"
+                outline_color = "grey"
+                item_tags = ("cell", str(cell_coord))
 
                 if self.in_combat_view:
                     outline_color = "lime" if cell_coord in grid_instance.walkable_cells else "red"
-                elif cell_coord in fishing_spots_coords:
+                
+                if cell_coord in exit_spots_coords:
+                    fill_color = "yellow"
+                    item_tags = ("exit", str(cell_coord))
+                elif cell_coord in fishing_spots_coords: # Priorité aux sorties si une case est les deux
                     fill_color = "orange" # Remplir les cases de pêche
 
                 # Pendant la phase de placement ET le combat, on affiche les cases de départ pour le debug
@@ -549,24 +555,64 @@ class GuiApp(tk.Tk):
                     canvas_x, canvas_y + cell_h / 2,  # Sommet bas
                     canvas_x - cell_w / 2, canvas_y   # Sommet gauche
                 ]
-                self.map_canvas.create_polygon(points, outline=outline_color, fill=fill_color, width=width)
+                # Determine the item_type_tag for the visible polygon
+                item_type_tag = "cell" # Default for fishing spots
+                if cell_coord in exit_spots_coords:
+                    item_type_tag = "exit"
+
+                # Visible polygon: has its type and coordinate as tags
+                self.map_canvas.create_polygon(points, outline=outline_color, fill=fill_color, width=width, tags=(item_type_tag, str(cell_coord))) 
+                
+                # Ajouter des tags pour rendre les polygones cliquables
+                if fill_color:
+                    # On recrée un polygone transparent par-dessus pour gérer le clic
+                    # It has a 'clickable' tag and its coordinate tag
+                    clickable_item = self.map_canvas.create_polygon(points, outline="", fill="", tags=("clickable", str(cell_coord)))
+                    self.map_canvas.tag_bind(clickable_item, "<Button-1>", lambda event, tags=(item_type_tag, str(cell_coord)): self.on_map_item_click(event, tags))
 
     def highlight_spot(self, cell, color):
         """Change la couleur d'un point de pêche sur la carte."""
-        # Cette fonction n'est plus utilisée avec le nouveau système de grille, mais on la garde au cas où.
-        pass
+        grid_cell = grid_instance.get_cell_from_screen_coords(cell['x'], cell['y'])
+        if grid_cell:
+            # Find the visible polygon (type "cell" for fishing spots) using its type and coordinate tags
+            tag_expression = f"cell && \"{str(grid_cell)}\""
+            items = self.map_canvas.find_withtag(tag_expression)
+            for item_id in items:
+                # Ensure we are modifying the visible polygon (not the transparent clickable one)
+                if self.map_canvas.itemcget(item_id, "fill") != "":
+                    self.map_canvas.itemconfig(item_id, fill=color)
 
-    def on_map_item_click(self, event, item_type, item_data):
+    def on_map_item_click(self, event, tags):
         """Gère le clic sur un élément de la carte."""
-        # Cette fonction est conservée pour une future utilisation (ex: éditeur de map visuel)
-        pass
+        # Réinitialiser la couleur de l'ancien élément sélectionné
+        if self.selected_map_item:
+            # On redessine pour restaurer les couleurs, c'est le plus simple et fiable
+            self.draw_map() 
+
+        item_type, item_data_str = tags
+        item_data = tuple(map(int, item_data_str.strip('()').split(',')))
+        self.selected_map_item = (item_type, item_data)
+        self.log_to_widget(f"[GUI] Sélectionné : {item_type} à la case {item_data}. Appuyez sur 'Suppr' pour effacer.")
+        self.map_canvas.focus_set() # Donner le focus au canvas pour qu'il reçoive l'event clavier
+
+        # Mettre en surbrillance la case sélectionnée
+        # Find the visible polygon for the selected item using its type and coordinate tags
+        tag_expression = f"{item_type} && \"{str(item_data)}\""
+        items = self.map_canvas.find_withtag(tag_expression)
+        for item_id in items:
+            # Ensure we are modifying the visible polygon
+            if self.map_canvas.itemcget(item_id, "fill") != "":
+                self.map_canvas.itemconfig(item_id, fill="cyan")
 
     def calibrate_grid(self):
         """Lance le processus d'étalonnage de la grille dans un thread séparé."""
         threading.Thread(target=grid_instance.calibrate, daemon=True).start()
 
-    def delete_map_item(self, item_type, item_data):
+    def delete_selected_map_item(self, event):
         """Supprime un élément de la carte après confirmation."""
+        if not self.selected_map_item: return # Rien n'est sélectionné
+        item_type, item_data = self.selected_map_item # item_data est un tuple (q, r)
+
         coords = get_map_coordinates()
         if not coords: return
 
@@ -574,15 +620,25 @@ class GuiApp(tk.Tk):
         if messagebox.askyesno("Confirmation de suppression", msg):
             try:
                 map_data = load_map_data(coords)
-                if item_type == "cell" and item_data in map_data.get("cells", []):
-                    map_data["cells"].remove(item_data)
-                elif item_type == "exit" and item_data in map_data.get("exits", {}):
-                    del map_data["exits"][item_data]
-
+                if item_type == "cell":
+                    # On doit retrouver la cellule par coordonnée de grille
+                    cells_to_keep = [c for c in map_data.get("cells", []) if grid_instance.get_cell_from_screen_coords(c['x'], c['y']) != item_data]
+                    map_data["cells"] = cells_to_keep
+                elif item_type == "exit":
+                    # On doit retrouver la sortie par coordonnée de grille
+                    exit_to_delete = None
+                    for direction, pos_data in map_data.get("exits", {}).items():
+                        if grid_instance.get_cell_from_screen_coords(pos_data['x'], pos_data['y']) == item_data:
+                            exit_to_delete = direction
+                            break
+                    if exit_to_delete:
+                        del map_data["exits"][exit_to_delete]
+                
                 with open(f"Maps/{coords}.json", "w") as f:
                     json.dump(map_data, f, indent=4)
                 
                 self.log_to_widget(f"[GUI] Point {item_data} supprimé de la carte {coords}.")
+                self.selected_map_item = None # Désélectionner l'élément
                 self.draw_map()
             except Exception as e:
                 self.log_to_widget(f"[GUI] Erreur lors de la suppression : {e}")
