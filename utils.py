@@ -13,21 +13,17 @@ stop_requested = False
 is_paused = False
 
 def set_pause_state(state: bool):
-    """Définit l'état de pause du bot."""
     global is_paused
     is_paused = state
 
 def set_stop_state(state: bool):
-    """Définit l'état d'arrêt du bot."""
     global stop_requested
     stop_requested = state
 
 def is_stop_requested():
-    """Retourne l'état actuel de la demande d'arrêt."""
     return stop_requested
 
 def check_for_pause():
-    """Vérifie si le script est en pause et attend si c'est le cas."""
     was_paused = False
     while is_paused:
         was_paused = True
@@ -56,7 +52,6 @@ def is_red_present(x, y, size=10, target_color=RED_RGB, tolerance=30, min_pixels
     return count >= min_pixels
 
 def check_and_close_levelup_popup(template_path="Images/button_ok.png", threshold=0.8):
-    """Cherche et clique sur le bouton de popup de niveau."""
     try:
         template = cv2.imread(template_path, 0)
         if template is None:
@@ -77,7 +72,6 @@ def check_and_close_levelup_popup(template_path="Images/button_ok.png", threshol
         return False
 
 def check_and_close_fight_end_popup(template_path="Images/button_X.png", threshold=0.8):
-    """Cherche et clique sur le bouton de fin de combat."""
     try:
         template = cv2.imread(template_path, 0)
         if template is None: return False

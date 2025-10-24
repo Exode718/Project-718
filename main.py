@@ -16,13 +16,9 @@ MAP_FOLDER = "Maps"
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 def request_map_change(direction):
-    """
-    Fonction appelée par la GUI pour initier un changement de map.
-    """
     set_move_request(direction)
 
 def get_map_coordinates_single_pass():
-    """Effectue une seule passe de l'OCR pour lire les coordonnées."""
     screenshot = ImageGrab.grab()
     crop_box = (0, 85, 300, 110)
     cropped = screenshot.crop(crop_box)
@@ -39,7 +35,6 @@ def get_map_coordinates_single_pass():
     return None
 
 def get_map_coordinates():
-    """Récupère les coordonnées de la carte avec une double vérification pour plus de fiabilité."""
     first_pass = get_map_coordinates_single_pass()
     if not first_pass:
         return None
@@ -54,7 +49,6 @@ def get_map_coordinates():
     return None
 
 def prompt_yes_no(message):
-    """Affiche une boîte de dialogue Oui/Non et retourne le choix de l'utilisateur."""
     return messagebox.askyesno("Création de map", message)
 
 def load_cells(map_coords):
@@ -71,7 +65,6 @@ def load_cells(map_coords):
 
 def create_map_interactively(map_coords, config, is_editing=False):
     import pyautogui, keyboard
-    """Guide l'utilisateur pour créer un fichier de map interactif."""
     if not is_editing:
         log(f"Aucune donnée pour la map {map_coords}. Lancement de l'outil de création.")
         if not prompt_yes_no("Voulez-vous créer cette map maintenant ?"):
@@ -173,10 +166,6 @@ def get_next_map_coords(current_coords_str, direction):
     return f"{next_x},{next_y}"
 
 def find_exit_with_fallback(map_data, primary_direction):
-    """
-    Cherche une sortie en utilisant une direction principale, puis des alternatives diagonales.
-    Retourne la direction trouvée ou None.
-    """
     exits = map_data.get("exits", {})
     if primary_direction in exits:
         return primary_direction
@@ -193,7 +182,6 @@ def find_exit_with_fallback(map_data, primary_direction):
     return None
 
 def wait_for_map_change(old_coords, timeout=20):
-    """Attend activement qu'un changement de map soit détecté."""
     start_time = time.time()
     while time.time() - start_time < timeout:
         new_coords = get_map_coordinates()
@@ -205,12 +193,11 @@ def wait_for_map_change(old_coords, timeout=20):
     return False
 
 def main_bot_logic(log_cb, finish_cb):
-    """La logique principale du bot, conçue pour être exécutée dans un thread."""
     set_log_callback(log_cb)
     
     with open("config.json", "r") as f:
         config = json.load(f)
-    gui_app = log_cb.__self__ # Récupérer l'instance de la GUI pour les callbacks
+    gui_app = log_cb.__self__
 
     visited_maps = set()
     previous_coords = None
@@ -239,9 +226,8 @@ def main_bot_logic(log_cb, finish_cb):
                 log("Mode 'Combat Only' activé. En attente d'un combat...")
                 while not is_fight_started() and not is_stop_requested():
                     check_for_pause()
-                    time.sleep(1) # Le scan est déjà rapide dans is_fight_started
-                if is_stop_requested(): break # Sortir si le bot est arrêté
-                # Si un combat est trouvé, la boucle principale continue et le gère ci-dessous
+                    time.sleep(1)
+                if is_stop_requested(): break
 
             if is_fight_started():
                 log("COMBAT DÉTECTÉ (inattendu) ! Lancement de la gestion du combat.")
@@ -250,11 +236,11 @@ def main_bot_logic(log_cb, finish_cb):
                 log("Reprise des activités après le combat.")
                 continue
             
-            # Scan rapide pour les agressions hors pêche
+            # --- Scan rapide pour les agressions (hors pêche) ---
             if gui_app.auto_combat_var.get() and not gui_app.combat_only_var.get():
                 if is_fight_started(checks=1, interval=0):
-                    continue # La boucle principale le détectera et le gérera
-                time.sleep(3) # Pause pour ne pas surcharger
+                    continue
+                time.sleep(3)
 
             coords = get_map_coordinates()
             if not coords:

@@ -6,7 +6,6 @@ from tkinter import messagebox
 import heapq
 from utils import log
 
-GRID_CONFIG_PATH = "grid_config.json"
 class Grid:
     def __init__(self):
         self.is_calibrated = False
@@ -17,46 +16,72 @@ class Grid:
         self.walkable_cells = set()
         self.los_transparent_cells = set()
         self.tactical_colors = [
-            (185, 206, 113),  # #B9CE71 (Case marchable standard)
-            (171, 191, 105),  # #ABBF69 (Case marchable standard, autre teinte)
-            (144, 168, 61),   # #90A83D (Icône de sortie sur case marchable)
-            (137, 160, 57),   # #89A039 (Icône de sortie sur case marchable, autre teinte)
-            (180, 183, 112),  # #B4B770 (Nouvelle teinte de case marchable)
-            (167, 170, 104)   # #A7AA68 (Nouvelle teinte de case marchable, plus sombre)
+            (185, 206, 113),  # #B9CE71 (Case marchable)
+            (171, 191, 105),  # #ABBF69 (Case marchable)
+            (180, 183, 112),  # #B4B770 (Case marchable)
+            (167, 170, 104),  # #A7AA68 (Case marchable)
+            (144, 168, 61),   # #90A83D (Sortie sur case marchable)
+            (137, 160, 57),   # #89A039 (Sortie sur case marchable, autre teinte)
         ]
         self.load_config()
 
     def load_config(self):
-        """Charge la configuration de la grille depuis un fichier JSON."""
         import json
-        if os.path.exists(GRID_CONFIG_PATH):
+        config_path = "config.json"
+        old_config_path = "grid_config.json"
+
+        if os.path.exists("config.json"):
             try:
-                with open(GRID_CONFIG_PATH, 'r') as f:
+                with open(config_path, 'r') as f:
                     config = json.load(f)
-                    self.origin = tuple(config['origin'])
-                    self.u_vec = tuple(config['u_vec'])
-                    self.v_vec = tuple(config['v_vec'])
-                    self.is_calibrated = True
-                    self._generate_grid_coordinates()
-                    log("[Grille] Configuration de la grille chargée.")
+                
+                grid_config = config.get('GRID')
+                if grid_config and 'origin' in grid_config:
+                    self._apply_config(grid_config)
+                    log("[Grille] Configuration de la grille chargée depuis config.json.")
+                    return
             except Exception as e:
                 log(f"[Grille] Erreur lors du chargement de la configuration : {e}")
-                self.is_calibrated = False
+        
+        # --- Migration de l'ancienne configuration ---
+        if os.path.exists(old_config_path):
+            log(f"[Grille] Ancien fichier '{old_config_path}' trouvé. Tentative de migration...")
+            try:
+                with open(old_config_path, 'r') as f:
+                    old_grid_config = json.load(f)
+                self._apply_config(old_grid_config)
+                self.save_config()
+                os.remove(old_config_path)
+                log(f"[Grille] Migration réussie. '{old_config_path}' a été supprimé.")
+                return
+            except Exception as e:
+                log(f"[Grille] Échec de la migration : {e}")
+
+        self.is_calibrated = False
+        log("[Grille] Aucune configuration de grille valide trouvée.")
+
+    def _apply_config(self, grid_config):
+        self.origin = tuple(grid_config['origin'])
+        self.u_vec = tuple(grid_config['u_vec'])
+        self.v_vec = tuple(grid_config['v_vec'])
+        self.is_calibrated = True
+        self._generate_grid_coordinates()
 
     def save_config(self):
-        """Sauvegarde la configuration actuelle de la grille."""
         import json
-        config = {
-            'origin': self.origin,
-            'u_vec': self.u_vec,
-            'v_vec': self.v_vec,
-        }
-        with open(GRID_CONFIG_PATH, 'w') as f:
+        try:
+            with open("config.json", 'r') as f:
+                config = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            config = {}
+        
+        config['GRID'] = {'origin': self.origin, 'u_vec': self.u_vec, 'v_vec': self.v_vec}
+        
+        with open("config.json", 'w') as f:
             json.dump(config, f, indent=4)
-        log("[Grille] Configuration de la grille sauvegardée.")
+        log("[Grille] Configuration de la grille sauvegardée dans config.json.")
 
     def calibrate(self):
-        """Lance le processus d'étalonnage manuel simple à 3 clics."""
         messagebox.showinfo("Étalonnage - Étape 1/3", "Survolez le centre d'une case (ex: votre case de départ) et appuyez sur 'Entrée'.")
         self.origin = self._find_cell_center_from_point(self._wait_for_click())
         log(f"[Grille] Origine enregistrée : {self.origin}")
@@ -76,11 +101,9 @@ class Grid:
         messagebox.showinfo("Étalonnage Terminé", "La grille a été étalonnée avec succès.")
 
     def _colors_are_similar(self, c1, c2, tolerance=10):
-        """Fonction utilitaire pour comparer la similarité des couleurs."""
         return c1 is not None and c2 is not None and all(abs(c1[i] - c2[i]) <= tolerance for i in range(3))
 
     def _wait_for_click(self):
-        """Attend que l'utilisateur appuie sur 'Entrée' et retourne la position de la souris."""
         import time
         while True:
             if keyboard.is_pressed('enter'):
@@ -89,7 +112,6 @@ class Grid:
         return pyautogui.position()
 
     def _find_cell_center_from_point(self, start_pos):
-        """Trouve le centre géométrique d'une case à partir d'un point situé à l'intérieur."""
         screenshot = pyautogui.screenshot()
         if not (0 <= start_pos[0] < screenshot.width and 0 <= start_pos[1] < screenshot.height):
             raise ValueError(f"Le point de départ {start_pos} est hors de l'écran.")
@@ -101,30 +123,24 @@ class Grid:
         min_y, max_y = y_start, y_start
         
         # Balayage horizontal
-        # Gauche
         for x in range(x_start, x_start - search_area, -1):
             if not self._colors_are_similar(screenshot.getpixel((x, y_start)), start_color_tuple, 10): break
             min_x = x
-        # Droite
-        for x in range(x_start, x_start + search_area): # No change
+        for x in range(x_start, x_start + search_area):
             if not self._colors_are_similar(screenshot.getpixel((x, y_start)), start_color_tuple, 10): break
             max_x = x
 
         # Balayage vertical
-        # Haut
-        for y in range(y_start, y_start - search_area, -1): # Utilise x_start pour le balayage vertical
+        for y in range(y_start, y_start - search_area, -1):
             if not self._colors_are_similar(screenshot.getpixel((x_start, y)), start_color_tuple, 10): break
             min_y = y
-        # Bas
-        for y in range(y_start, y_start + search_area): # Utilise x_start pour le balayage vertical
+        for y in range(y_start, y_start + search_area): 
             if not self._colors_are_similar(screenshot.getpixel((x_start, y)), start_color_tuple, 10): break
             max_y = y
 
-        # Le centre est la moyenne des extrêmes
         return ((min_x + max_x) // 2, (min_y + max_y) // 2)
 
     def _generate_grid_coordinates(self):
-        """Génère les coordonnées écran pour chaque case de la grille."""
         if not self.is_calibrated:
             return
 
@@ -138,7 +154,6 @@ class Grid:
                     self.cells[(q, r)] = (int(x), int(y))
 
     def get_cell_from_screen_coords(self, x, y):
-        """Trouve la case la plus proche d'une coordonnée écran."""
         if not self.is_calibrated:
             return None
 
@@ -154,7 +169,6 @@ class Grid:
         return closest_cell
     
     def map_obstacles(self, color_tolerance=15, screenshot=None):
-        """Analyse la grille pour identifier les cases marchables et les obstacles en mode tactique."""
         if not self.cells or not self.tactical_colors:
             log("[Grille] Impossible de mapper les obstacles : grille non étalonnée ou couleurs tactiques non définies.")
             return
@@ -165,7 +179,7 @@ class Grid:
         if screenshot is None:
             screenshot = pyautogui.screenshot()
 
-        # Pré-calculer les déplacements en spirale pour le scan de proximité
+        # --- Scan en spirale pour la robustesse ---
         spiral_moves = [(0, 0)]
         for i in range(1, 4): # Rayon de 3 pixels
             for dx in range(-i, i + 1):
@@ -180,7 +194,7 @@ class Grid:
         for cell_coord, screen_pos in self.cells.items():
             found_walkable = False
 
-            # --- Étape 1: Chercher une couleur de case marchable ---
+            # --- Étape 1: Chercher une couleur de case marchable (tactique) ---
             for dx, dy in spiral_moves:
                 scan_x, scan_y = screen_pos[0] + dx, screen_pos[1] + dy
                 if not (0 <= scan_x < screenshot.width and 0 <= scan_y < screenshot.height):
@@ -197,7 +211,7 @@ class Grid:
                 if found_walkable:
                     break
             
-            # --- Étape 2: Si la case n'est pas marchable, vérifier si elle bloque la vue ---
+            # --- Étape 2: Si non marchable, vérifier si elle bloque la Ligne de Vue (LOS) ---
             if not found_walkable:
                 has_black = False
                 for dx, dy in spiral_moves:
@@ -205,7 +219,6 @@ class Grid:
                     if not (0 <= scan_x < screenshot.width and 0 <= scan_y < screenshot.height):
                         continue
                     pixel_color = screenshot.getpixel((scan_x, scan_y))
-                    # Si on trouve un pixel suffisamment noir, la ligne de vue passe
                     if sum(pixel_color) < black_color_threshold:
                         self.los_transparent_cells.add(cell_coord)
                         has_black = True
@@ -214,7 +227,6 @@ class Grid:
         log(f"[Grille] Cartographie terminée : {len(self.walkable_cells)} cases marchables trouvées.")
 
     def get_neighbors(self, cell):
-        """Retourne les voisins marchables d'une case."""
         q, r = cell
         neighbors = [
             (q + 1, r), (q - 1, r), (q, r + 1), (q, r - 1),
@@ -223,13 +235,11 @@ class Grid:
         return [n for n in neighbors if n in self.walkable_cells]
 
     def get_distance(self, cell1, cell2):
-        """Calcule la distance de grille (Manhattan) entre deux cases."""
         return (abs(cell1[0] - cell2[0]) 
               + abs(cell1[0] + cell1[1] - cell2[0] - cell2[1]) 
               + abs(cell1[1] - cell2[1])) / 2
 
     def has_line_of_sight(self, start, end):
-        """Vérifie la ligne de vue entre deux cases en utilisant l'algorithme de Bresenham."""
         if start not in self.walkable_cells or end not in self.walkable_cells:
             return False
 
@@ -254,13 +264,12 @@ class Grid:
                 err += dx
                 y0 += sy
         
-        for cell in line_cells[1:-1]: # On vérifie les cases entre le départ et l'arrivée
+        for cell in line_cells[1:-1]:
             if cell not in self.los_transparent_cells:
                 return False
         return True
 
     def find_path(self, start, end):
-        """Trouve le chemin le plus court en utilisant l'algorithme A*."""
         if start not in self.walkable_cells or end not in self.walkable_cells:
             return None
 
