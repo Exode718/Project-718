@@ -83,7 +83,7 @@ def wait_for_fishing_cycle_color(x, y, min_delay=FISHING_DELAY_MIN, max_delay=FI
     while time.time() - start < timeout:
         if is_stop_requested():
             log("Arrêt d'urgence pendant la pêche.")
-            return False
+            return False # Échec
         if not is_red_present(x, y):
             log("Reprise du scan.")
             return True
@@ -92,7 +92,7 @@ def wait_for_fishing_cycle_color(x, y, min_delay=FISHING_DELAY_MIN, max_delay=FI
     delay = random.uniform(min_delay, max_delay)
     log(f"Reprise du scan (timeout). Attente forcée de {delay:.2f}s.")
     time.sleep(delay)
-    return False
+    return False # Échec
 
 def run_fishing_cycle(map_coords, map_data, gui_app, target_direction):
     check_for_pause()
@@ -133,22 +133,25 @@ def run_fishing_cycle(map_coords, map_data, gui_app, target_direction):
 
         x, y = cell["x"], cell["y"]
 
-        gui_app.after(0, gui_app.highlight_spot, cell, "yellow")
+        gui_app.after(0, gui_app.highlight_spot, cell, "orange")
 
         before = capture_zone(x, y)
         pyautogui.moveTo(x, y, duration=0.05)
         time.sleep(0.05)
         after = capture_zone(x, y)
 
+        is_fishing = False
         if detect_change_raw(before, after):
             log(f"Poisson trouvé à ({x}, {y})")
             click_with_offset(x, y, duration=0.05)
 
             if find_and_click_pecher_button():
                 reset_cursor_to_case(x, y)
-                wait_for_fishing_cycle_color(x, y, min_delay=FISHING_START_DELAY)
-                check_and_close_levelup_popup()
-
+                gui_app.after(0, gui_app.highlight_spot, cell, "lightgreen") # Changement de couleur immédiat
+                
+                is_fishing = wait_for_fishing_cycle_color(x, y, min_delay=FISHING_START_DELAY)
+                
+                check_and_close_levelup_popup() # On vérifie les popups même si la pêche a échoué
                 if is_fight_started():
                     auto_combat_enabled = gui_app.auto_combat_var.get()
                     handle_fight(auto_combat_enabled, gui_app)
@@ -157,7 +160,8 @@ def run_fishing_cycle(map_coords, map_data, gui_app, target_direction):
             else:
                 log("Bouton 'Pêcher' non trouvé, passage au suivant.")
 
-        gui_app.after(0, gui_app.highlight_spot, cell, "cyan")
+        if is_fishing:
+            gui_app.after(0, gui_app.highlight_spot, cell, "orange")
         time.sleep(random.uniform(0.05, 0.1))
     
     return not (is_stop_requested() or move_request_direction)

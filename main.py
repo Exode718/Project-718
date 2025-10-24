@@ -216,6 +216,21 @@ def main_bot_logic(log_cb, finish_cb):
     previous_coords = None
 
     try:
+        # --- Vérification initiale de l'état de combat ---
+        if gui_app.auto_combat_var.get():
+            log("Vérification de l'état de combat au démarrage...")
+            if is_fight_started(template_path="Images/button_end_turn.png", checks=1):
+                log("Combat déjà en cours détecté (tour de jeu). Lancement de la gestion.")
+                handle_fight(True, gui_app)
+            elif is_fight_started(template_path="Images/button_ready.png", checks=1):
+                log("Combat déjà en cours détecté (phase de placement). Lancement de la gestion.")
+                handle_fight(True, gui_app)
+            else:
+                log("Aucun combat en cours.")
+        else:
+            log("Combat auto désactivé, pas de vérification initiale.")
+
+
         while not is_stop_requested():
             check_for_pause()
 
@@ -224,7 +239,7 @@ def main_bot_logic(log_cb, finish_cb):
                 log("Mode 'Combat Only' activé. En attente d'un combat...")
                 while not is_fight_started() and not is_stop_requested():
                     check_for_pause()
-                    time.sleep(1)
+                    time.sleep(1) # Le scan est déjà rapide dans is_fight_started
                 if is_stop_requested(): break # Sortir si le bot est arrêté
                 # Si un combat est trouvé, la boucle principale continue et le gère ci-dessous
 
@@ -234,6 +249,12 @@ def main_bot_logic(log_cb, finish_cb):
                 handle_fight(auto_combat_enabled, gui_app)
                 log("Reprise des activités après le combat.")
                 continue
+            
+            # Scan rapide pour les agressions hors pêche
+            if gui_app.auto_combat_var.get() and not gui_app.combat_only_var.get():
+                if is_fight_started(checks=1, interval=0):
+                    continue # La boucle principale le détectera et le gérera
+                time.sleep(3) # Pause pour ne pas surcharger
 
             coords = get_map_coordinates()
             if not coords:
