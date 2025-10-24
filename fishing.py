@@ -25,7 +25,6 @@ MAP_FOLDER = "Maps"
 IMAGE_FOLDER = "Images"
 PECHER_IMAGE = os.path.join(IMAGE_FOLDER, "button_fish.png")
 
-# --- State for map changing ---
 move_request_direction = None
 
 def set_move_request(direction):
@@ -55,11 +54,11 @@ def reset_cursor_to_case(x, y):
     pyautogui.moveTo(x, y, duration=CURSOR_RESET_DURATION)
 
 def find_and_click_pecher_button(template_path=PECHER_IMAGE, threshold=PECHER_THRESHOLD, duration=0.05):
-    screen = ImageGrab.grab() # This line was already there, no change needed.
+    screen = ImageGrab.grab()
     screen_gray = cv2.cvtColor(np.array(screen), cv2.COLOR_BGR2GRAY)
     template = cv2.imread(template_path, 0)
     w, h = template.shape[::-1]
-    res = cv2.matchTemplate(screen_gray, template, cv2.TM_CCOEFF_NORMED) # type: ignore
+    res = cv2.matchTemplate(screen_gray, template, cv2.TM_CCOEFF_NORMED)
     loc = np.where(res >= threshold)
     for pt in zip(*loc[::-1]):
         pyautogui.moveTo(pt[0] + w // 2, pt[1] + h // 2, duration=duration)
@@ -83,7 +82,7 @@ def wait_for_fishing_cycle_color(x, y, min_delay=FISHING_DELAY_MIN, max_delay=FI
     while time.time() - start < timeout:
         if is_stop_requested():
             log("Arrêt d'urgence pendant la pêche.")
-            return False # Échec
+            return False
         if not is_red_present(x, y):
             log("Reprise du scan.")
             return True
@@ -92,7 +91,7 @@ def wait_for_fishing_cycle_color(x, y, min_delay=FISHING_DELAY_MIN, max_delay=FI
     delay = random.uniform(min_delay, max_delay)
     log(f"Reprise du scan (timeout). Attente forcée de {delay:.2f}s.")
     time.sleep(delay)
-    return False # Échec
+    return False
 
 def run_fishing_cycle(map_coords, map_data, gui_app, target_direction):
     check_for_pause()

@@ -45,11 +45,10 @@ class GuiApp(tk.Tk):
         self.style.configure('TNotebook.Tab', background=light_grey_bg, foreground=text_color, padding=[10, 5])
         self.style.map('TNotebook.Tab', background=[('selected', dark_bg)], padding=[('selected', [10, 5])])
 
-        # On force la barre de titre de Windows en mode sombre pour le style
         self.update_idletasks()
         windll.dwmapi.DwmSetWindowAttribute(windll.user32.GetParent(self.winfo_id()), 20, byref(c_int(2)), 4)
 
-        # --- Onglets ---
+        # --- Création des onglets ---
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(pady=10, padx=10, fill="both", expand=True)
 
@@ -65,34 +64,31 @@ class GuiApp(tk.Tk):
         self.notebook.add(self.combat_tab, text='Combat')
         self.notebook.add(self.settings_tab, text='Configuration')
 
-        # --- Widgets ---
+        # --- Widgets de l'onglet Bot ---
         control_frame = ttk.Frame(self.bot_tab)
         control_frame.pack(side=tk.BOTTOM, pady=(4, 10), fill=tk.X, padx=5)
-        control_frame.columnconfigure(3, weight=1)
+        control_frame.columnconfigure(4, weight=1)
 
         self.start_button = ttk.Button(control_frame, text="Démarrer", command=self.start_bot)
         self.start_button.grid(row=0, column=0, padx=5)
 
         self.pause_button = ttk.Button(control_frame, text="Pause/Reprise", command=self.toggle_pause_bot, state='disabled')
         self.pause_button.grid(row=0, column=1, padx=5)
-
+        
         self.reload_button = ttk.Button(control_frame, text="Recharger", command=self.reload_bot, state='disabled')
         self.reload_button.grid(row=0, column=2, padx=(5, 15))
 
-        # --- Case à cocher pour le combat auto ---
-        self.auto_combat_var = tk.BooleanVar()
-        self.auto_combat_check = ttk.Checkbutton(control_frame, text="Combat Auto", variable=self.auto_combat_var)
-        self.auto_combat_check.grid(row=0, column=3, padx=(5,0))
-
-        # --- Case à cocher pour "Combat Only" ---
         self.combat_only_var = tk.BooleanVar()
-        self.combat_only_check = ttk.Checkbutton(control_frame, text="Combat Only", variable=self.combat_only_var)
-        self.combat_only_check.grid(row=0, column=4, padx=(0,5))
-        
-        control_frame.columnconfigure(5, weight=1)
-        self.status_label = ttk.Label(control_frame, text="Statut : Prêt", anchor='e')
-        self.status_label.grid(row=0, column=5, sticky='e', padx=5)
+        self.combat_only_check = ttk.Checkbutton(control_frame, text="Fight", variable=self.combat_only_var)
+        self.combat_only_check.grid(row=0, column=3, padx=(15,0))
 
+        self.auto_combat_var = tk.BooleanVar()
+        self.auto_combat_check = ttk.Checkbutton(control_frame, text="Auto", variable=self.auto_combat_var)
+        self.auto_combat_check.grid(row=0, column=4, padx=(0,5))
+        
+        control_frame.columnconfigure(6, weight=1)
+        self.status_label = ttk.Label(control_frame, text="Statut : Prêt", anchor='e')
+        self.status_label.grid(row=0, column=6, sticky='e', padx=5)
 
         self.log_widget = scrolledtext.ScrolledText(self.bot_tab, state='disabled', bg=light_grey_bg, fg=text_color, font=("Consolas", 9), relief='flat')
         self.log_widget.pack(pady=5, padx=5, fill=tk.BOTH, expand=True)
@@ -113,10 +109,16 @@ class GuiApp(tk.Tk):
             ("MOVE_UP", "Déplacement Haut"),
             ("MOVE_DOWN", "Déplacement Bas"),
             ("MOVE_LEFT", "Déplacement Gauche"),
-            ("MOVE_RIGHT", "Déplacement Droite")
+            ("MOVE_RIGHT", "Déplacement Droite"),
+            ("TACTICAL_MODE_POS", "Pos. Mode Tactique"),
+            ("LOCK_MODE_POS", "Pos. Verrouillage Combat"),
+            ("CREATURE_MODE_POS", "Pos. Mode Créature"),
+            ("READY_BUTTON_POS", "Pos. Bouton Prêt"),
+            ("END_TURN_BUTTON_POS", "Pos. Bouton Fin de Tour"),
+            ("FIGHT_END_CLOSE_POS", "Pos. Fermeture Fin Combat"),
+            ("LEVEL_UP_OK_POS", "Pos. OK Métier/Niveau"),
         ]
 
-        # On met les raccourcis dans une zone qui peut défiler si ça dépasse
         canvas = tk.Canvas(self.settings_tab, bg=dark_bg, highlightthickness=0)
         scrollbar = ttk.Scrollbar(self.settings_tab, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
@@ -131,7 +133,11 @@ class GuiApp(tk.Tk):
             ttk.Label(frame, text=f"{label_text}:", width=25).pack(side=tk.LEFT)
             var = tk.StringVar()
             ttk.Entry(frame, textvariable=var, state='readonly', width=15).pack(side=tk.LEFT, padx=5)
-            capture_button = ttk.Button(frame, text="Capturer", command=lambda v=var, b=None: self.capture_key(v, b))
+            
+            is_pos_capture = "POS" in key_id
+            capture_text = "Capturer Pos" if is_pos_capture else "Capturer Touche"
+            capture_func = self.capture_position if is_pos_capture else self.capture_key
+            capture_button = ttk.Button(frame, text=capture_text, command=lambda v=var, b=None, f=capture_func: f(v, b))
             capture_button.pack(side=tk.LEFT, padx=5)
             self.key_vars[key_id] = (var, capture_button)
 
@@ -142,16 +148,18 @@ class GuiApp(tk.Tk):
         config_control_frame.pack(side=tk.BOTTOM, pady=(4, 10), fill=tk.X, padx=5)
         self.status_label_config = ttk.Label(config_control_frame, text="Statut : Prêt", anchor='w')
         self.status_label_config.pack(side=tk.TOP, fill='x', padx=5)
+        
+        self.calibrate_grid_button = ttk.Button(config_control_frame, text="Étalonner Grille", command=self.calibrate_grid)
+        self.calibrate_grid_button.pack(side=tk.TOP, pady=2, fill=tk.X)
+        
         self.save_settings_button = ttk.Button(config_control_frame, text="Sauvegarder", command=self.save_settings)
-        self.save_settings_button.pack(side=tk.LEFT, padx=5)
+        self.save_settings_button.pack(side=tk.TOP, pady=2, fill=tk.X)
 
         # --- Widgets de l'onglet Déplacement ---
         self.path_log_widget = scrolledtext.ScrolledText(self.path_tab, state='disabled', bg=light_grey_bg, fg=text_color, font=("Consolas", 9), relief='flat', height=12)
         self.path_log_widget.pack(pady=(5,0), padx=5, fill='x', expand=False)
 
         path_buttons_frame = ttk.Frame(self.path_tab)
-
-        # Création des boutons directionnels
         buttons = {
             'haut-gauche': (0, 0), 'haut': (0, 1), 'haut-droite': (0, 2),
             'gauche': (1, 0), 'droite': (1, 2),
@@ -177,12 +185,14 @@ class GuiApp(tk.Tk):
 
         map_controls_frame = ttk.Frame(self.map_tab)
         map_controls_frame.pack(side=tk.BOTTOM, pady=(4, 10), fill=tk.X, padx=5)
-        map_controls_frame.columnconfigure(2, weight=1)
+        map_controls_frame.columnconfigure(3, weight=1)
 
         ttk.Button(map_controls_frame, text="Ajouter/Éditer Map", command=self.add_or_edit_map).grid(row=0, column=0, padx=5)
         ttk.Button(map_controls_frame, text="Rafraîchir", command=self.draw_map).grid(row=0, column=1, padx=5)
-        self.calibrate_grid_button = ttk.Button(map_controls_frame, text="Étalonner Grille", command=self.calibrate_grid)
-        self.calibrate_grid_button.grid(row=0, column=2, padx=10)
+
+        self.add_fish_spot_var = tk.BooleanVar()
+        self.add_fish_spot_check = ttk.Checkbutton(map_controls_frame, text="Ajouter Poisson", variable=self.add_fish_spot_var)
+        self.add_fish_spot_check.grid(row=0, column=2, padx=(15, 5), sticky='w')
 
         self.map_status_label = ttk.Label(map_controls_frame, text="Statut : Prêt", anchor='e')
         self.map_status_label.grid(row=0, column=3, sticky='e', padx=5)
@@ -232,8 +242,7 @@ class GuiApp(tk.Tk):
         spells_scrollbar.pack(side=tk.RIGHT, fill='y')
         self.spells_tree.configure(yscrollcommand=spells_scrollbar.set)
 
-
-        # --- Bot state ---
+        # --- État interne du bot ---
         self.bot_thread = None
         self.keyboard_listener_thread = None
         self.is_paused = False
@@ -243,7 +252,6 @@ class GuiApp(tk.Tk):
         self.selected_map_item = None
         self.closing_on_stop = False
         self.reloading = False
-        self.map_items = {} # Pour garder en mémoire les éléments dessinés sur la carte (points, sorties)
         self.in_combat_view = False
         self.in_placement_phase = False
 
@@ -282,10 +290,8 @@ class GuiApp(tk.Tk):
         set_pause_state(False)
         self.is_paused = False
 
-        # On affiche la carte une première fois au lancement
         self.draw_map()
 
-        # On lance le bot dans son propre "thread" pour que l'interface ne freeze pas
         self.bot_thread = threading.Thread(target=main_bot_logic, args=(self.log_to_widget, self.on_bot_finished), daemon=True)
         self.bot_thread.start()
 
@@ -331,7 +337,7 @@ class GuiApp(tk.Tk):
         try:
             map_data = load_map_data(coords)
             
-            # Chercher une sortie valide (directe ou en fallback)
+            # Chercher une sortie valide
             target_direction = find_exit_with_fallback(map_data, direction)
             
             if target_direction:
@@ -350,24 +356,20 @@ class GuiApp(tk.Tk):
             self.log_to_widget(f"[Trajet] Erreur lors du déplacement manuel : {e}")
 
     def perform_move(self, current_coords, map_data, direction):
-        """Effectue le clic et attend le changement de map."""
         exit_pos = map_data["exits"][direction]
         pyautogui.click(exit_pos["x"], exit_pos["y"])
         self.log_to_widget(f"[Trajet] Clic sur la sortie '{direction}'. Attente du changement de map...")
-        
-        # Utilise la fonction de main.py dans un thread pour ne pas geler la GUI
+           
         if wait_for_map_change(current_coords):
-            # Rafraîchir la carte après un court délai
             self.after(500, self.draw_map) 
             
     def stop_bot(self, close_app=False):
         if self.bot_thread and self.bot_thread.is_alive():
             self.log_to_widget("[GUI] Demande d'arrêt du bot...")
-            # Si le bot est en pause, on le réveille pour qu'il puisse voir qu'on veut l'arrêter
             if self.is_paused:
                 self.toggle_pause_bot()
 
-            set_stop_state(True) # type: ignore
+            set_stop_state(True)
             self.pause_button.config(state='disabled')
             self.reload_button.config(state='disabled')
             if close_app:
@@ -376,7 +378,6 @@ class GuiApp(tk.Tk):
             self.destroy()
 
     def on_bot_finished(self):
-        """Callback appelé à la fin du thread du bot."""
         self.update_status_labels("Statut : Arrêté")
         self.start_button.config(state='normal')
         self.pause_button.config(state='disabled')
@@ -391,35 +392,76 @@ class GuiApp(tk.Tk):
             self.after(500, self.start_bot)
 
     def capture_key(self, var_to_set, _):
-        """Capture la prochaine touche pressée dans un thread séparé pour ne pas bloquer la GUI."""
         def do_capture():
-            # On désactive tous les boutons "Capturer" pour éviter les clics multiples
             for _, (_, btn) in self.key_vars.items():
                 btn.config(text="...", state='disabled')
             
-            key_name = keyboard.read_key(suppress=True)
+            self.log_to_widget("[GUI] En attente d'un raccourci clavier...")
+            
+            pressed_keys = set()
+            while True:
+                event = keyboard.read_event(suppress=True)
+                if event.event_type == keyboard.KEY_DOWN:
+                    pressed_keys.add(event.name)
+                elif event.event_type == keyboard.KEY_UP:
+                    break
+            
+            key_map = {
+                'right ctrl': 'CtrlD', 'left ctrl': 'CtrlG',
+                'alt': 'Alt', 'alt gr': 'AltGr', 'shift': 'Maj',
+                'delete': 'Suppr', 'enter': 'Entrée', 'esc': 'Échap',
+                'up': 'Haut', 'down': 'Bas', 'left': 'Gauche', 'right': 'Droite'
+            }
+            
+            key_names = {key_map.get(k, k.capitalize()) for k in pressed_keys}
+            
+            modifiers_order = ['CtrlG', 'CtrlD', 'Alt', 'AltGr', 'Maj']
+            mods = sorted(
+                [k for k in key_names if k in modifiers_order],
+                key=lambda m: modifiers_order.index(m)
+            )
+            keys = sorted([k for k in key_names if k not in mods])
+            
+            final_keys = mods + keys
+            key_name = "+".join(final_keys)
             
             self.after(0, var_to_set.set, key_name)
             self.log_to_widget(f"[GUI] Touche capturée : {key_name}")
 
-            # On réactive tout, c'est bon !
-            for _, (_, btn) in self.key_vars.items():
-                btn.config(text="Capturer", state='normal')
+            for key_id, (_, btn) in self.key_vars.items():
+                is_pos_capture = "POS" in key_id
+                capture_text = "Capturer Pos" if is_pos_capture else "Capturer Touche"
+                btn.config(text=capture_text, state='normal')
 
         threading.Thread(target=do_capture, daemon=True).start()
 
+    def capture_position(self, var_to_set, _):
+        def do_capture():
+            for _, (_, btn) in self.key_vars.items():
+                btn.config(text="...", state='disabled')
+            
+            self.log_to_widget("[GUI] Capture de position dans 2s...")
+            time.sleep(2)
+            x, y = pyautogui.position()
+            pos_str = f"{x},{y}"
+            
+            self.after(0, var_to_set.set, pos_str)
+            self.log_to_widget(f"[GUI] Position capturée : {pos_str}")
+
+            for _, (_, btn) in self.key_vars.items():
+                btn.config(text="Capturer" if "POS" not in btn.cget('text') else "Capturer Pos", state='normal')
+        threading.Thread(target=do_capture, daemon=True).start()
+
     def setup_global_hotkeys(self):
-        """Met en place les raccourcis clavier globaux."""
         try:
             keyboard.remove_all_hotkeys()
         except AttributeError:
             pass
         
         pause_key = self.key_vars["PAUSE_RESUME"][0].get()
-        if pause_key and pause_key != 'esc':
-            hotkey = f"ctrl+{pause_key}"
-            keyboard.add_hotkey(hotkey, self.toggle_pause_bot_hotkey, suppress=True)
-            self.log_to_widget(f"[Clavier] Touche Pause/Reprise configurée sur '{hotkey}'.")
+        if pause_key:
+            keyboard.add_hotkey(pause_key, self.toggle_pause_bot_hotkey, suppress=True)
+            self.log_to_widget(f"[Clavier] Touche Pause/Reprise configurée sur '{pause_key}'.")
 
         move_keys = {
             "MOVE_UP": "haut", "MOVE_DOWN": "bas",
@@ -428,12 +470,10 @@ class GuiApp(tk.Tk):
         for key_id, direction in move_keys.items():
             key = self.key_vars[key_id][0].get()
             if key:
-                hotkey = f"ctrl+{key}"
-                keyboard.add_hotkey(hotkey, lambda d=direction: self.trigger_map_change(d), suppress=True)
-                self.log_to_widget(f"[Clavier] Touche de déplacement '{direction.capitalize()}' configurée sur '{hotkey}'.")
+                keyboard.add_hotkey(key, lambda d=direction: self.trigger_map_change(d), suppress=True)
+                self.log_to_widget(f"[Clavier] Touche de déplacement '{direction.capitalize()}' configurée sur '{key}'.")
 
     def toggle_pause_bot_hotkey(self):
-        """Gère la pause/reprise via raccourci, uniquement si le bot est en cours."""
         if self.bot_thread and self.bot_thread.is_alive():
             self.toggle_pause_bot()
 
@@ -451,10 +491,6 @@ class GuiApp(tk.Tk):
             threading.Thread(target=create_map_interactively, args=(coords, None, map_exists), daemon=True).start()
 
     def draw_map(self, in_combat=None):
-        """
-        Affiche la carte et la grille. L'affichage s'adapte automatiquement
-        si le bot est en combat ou en phase de récolte.
-        """
         if in_combat is not None:
             self.in_combat_view = in_combat
 
@@ -483,7 +519,6 @@ class GuiApp(tk.Tk):
         self.map_bg_photo = ImageTk.PhotoImage(img_resized)
         self.map_canvas.create_image(0, 0, image=self.map_bg_photo, anchor='nw')
 
-        # Récupérer les spots de pêche pour l'affichage hors combat
         map_data = {}
         fishing_spots_coords = set()
         exit_spots_coords = set()
@@ -492,23 +527,20 @@ class GuiApp(tk.Tk):
             if coords:
                 try:
                     map_data = load_map_data(coords)
-                    
-                    # Convertir les coordonnées écran des spots de pêche en coordonnées de grille
                     for cell_data in map_data.get("cells", []):
                         grid_cell = grid_instance.get_cell_from_screen_coords(cell_data['x'], cell_data['y'])
                         if grid_cell:
                             fishing_spots_coords.add(grid_cell)
 
-                    # Convertir les coordonnées écran des sorties en coordonnées de grille
                     for direction, pos_data in map_data.get("exits", {}).items():
                         grid_cell = grid_instance.get_cell_from_screen_coords(pos_data['x'], pos_data['y'])
                         if grid_cell:
                             exit_spots_coords.add(grid_cell)
 
                 except FileNotFoundError:
-                    pass # Pas grave si le fichier n'existe pas encore
+                    pass
 
-        # Dessiner la grille
+        # --- Dessin de la grille ---
         for cell_coord, screen_pos in grid_instance.cells.items():
             if game_area[0] <= screen_pos[0] < game_area[2] and game_area[1] <= screen_pos[1] < game_area[3]:
                 relative_x = screen_pos[0] - game_area[0]
@@ -526,28 +558,23 @@ class GuiApp(tk.Tk):
                 if cell_coord in exit_spots_coords:
                     fill_color = "yellow"
                     item_tags = ("exit", str(cell_coord))
-                elif cell_coord in fishing_spots_coords: # Priorité aux sorties si une case est les deux
-                    fill_color = "orange" # Remplir les cases de pêche
+                elif cell_coord in fishing_spots_coords:
+                    fill_color = "orange"
 
-                # Pendant la phase de placement ET le combat, on affiche les cases de départ pour le debug
-                if self.in_combat_view:
+                # --- Affichage spécifique au combat ---
+                if self.in_placement_phase:
                     if cell_coord in combat_state.possible_player_starts:
                         fill_color = "white"
                         outline_color = "white"
                     elif cell_coord in combat_state.possible_monster_starts:
                         fill_color = "black"
                         outline_color = "black"
-
-                    # Pendant la phase de placement, on sur-couleur les monstres détectés et on change le contour
-                    if self.in_placement_phase:
-                        if cell_coord in combat_state.monster_positions:
-                            fill_color = "red" # Rouge pour les monstres détectés
-                    
-                    # Si la case n'est pas une case de départ, on utilise la couleur de la grille de combat
-                    if not fill_color:
-                        outline_color = "lime" if cell_coord in grid_instance.walkable_cells else "red"
+                    if cell_coord in combat_state.monster_positions:
+                        fill_color = "red" # Rouge pour les monstres détectés
+                elif self.in_combat_view: # En combat, mais hors placement
+                    outline_color = "lime" if cell_coord in grid_instance.walkable_cells else "red"
                 
-                width = 2 if fill_color and self.in_placement_phase else 1 # Contour plus épais pour les cases de départ en placement
+                width = 2 if self.in_placement_phase and (cell_coord in combat_state.possible_player_starts or cell_coord in combat_state.possible_monster_starts) else 1
                 cell_w, cell_h = 97 * scale, 50 * scale
                 points = [
                     canvas_x, canvas_y - cell_h / 2,  # Sommet haut
@@ -555,63 +582,78 @@ class GuiApp(tk.Tk):
                     canvas_x, canvas_y + cell_h / 2,  # Sommet bas
                     canvas_x - cell_w / 2, canvas_y   # Sommet gauche
                 ]
-                # Determine the item_type_tag for the visible polygon
-                item_type_tag = "cell" # Default for fishing spots
+                item_type_tag = "cell"
                 if cell_coord in exit_spots_coords:
                     item_type_tag = "exit"
 
-                # Visible polygon: has its type and coordinate as tags
                 self.map_canvas.create_polygon(points, outline=outline_color, fill=fill_color, width=width, tags=(item_type_tag, str(cell_coord))) 
                 
-                # Ajouter des tags pour rendre les polygones cliquables
-                if fill_color:
-                    # On recrée un polygone transparent par-dessus pour gérer le clic
-                    # It has a 'clickable' tag and its coordinate tag
-                    clickable_item = self.map_canvas.create_polygon(points, outline="", fill="", tags=("clickable", str(cell_coord)))
-                    self.map_canvas.tag_bind(clickable_item, "<Button-1>", lambda event, tags=(item_type_tag, str(cell_coord)): self.on_map_item_click(event, tags))
+                clickable_item = self.map_canvas.create_polygon(points, outline="", fill="", tags=("clickable", str(cell_coord)))
+                self.map_canvas.tag_bind(clickable_item, "<Button-1>", lambda event, tags=(item_type_tag, str(cell_coord)): self.on_map_item_click(event, tags))
+
+
 
     def highlight_spot(self, cell, color):
-        """Change la couleur d'un point de pêche sur la carte."""
         grid_cell = grid_instance.get_cell_from_screen_coords(cell['x'], cell['y'])
         if grid_cell:
-            # Find the visible polygon (type "cell" for fishing spots) using its type and coordinate tags
             tag_expression = f"cell && \"{str(grid_cell)}\""
             items = self.map_canvas.find_withtag(tag_expression)
             for item_id in items:
-                # Ensure we are modifying the visible polygon (not the transparent clickable one)
                 if self.map_canvas.itemcget(item_id, "fill") != "":
                     self.map_canvas.itemconfig(item_id, fill=color)
 
     def on_map_item_click(self, event, tags):
-        """Gère le clic sur un élément de la carte."""
-        # Réinitialiser la couleur de l'ancien élément sélectionné
+        if self.add_fish_spot_var.get():
+            self.add_fish_spot_on_click(tags)
+            return
+
         if self.selected_map_item:
-            # On redessine pour restaurer les couleurs, c'est le plus simple et fiable
             self.draw_map() 
 
         item_type, item_data_str = tags
         item_data = tuple(map(int, item_data_str.strip('()').split(',')))
         self.selected_map_item = (item_type, item_data)
         self.log_to_widget(f"[GUI] Sélectionné : {item_type} à la case {item_data}. Appuyez sur 'Suppr' pour effacer.")
-        self.map_canvas.focus_set() # Donner le focus au canvas pour qu'il reçoive l'event clavier
+        self.map_canvas.focus_set()
 
-        # Mettre en surbrillance la case sélectionnée
-        # Find the visible polygon for the selected item using its type and coordinate tags
+        # --- Mise en surbrillance de la sélection ---
         tag_expression = f"{item_type} && \"{str(item_data)}\""
         items = self.map_canvas.find_withtag(tag_expression)
         for item_id in items:
-            # Ensure we are modifying the visible polygon
             if self.map_canvas.itemcget(item_id, "fill") != "":
                 self.map_canvas.itemconfig(item_id, fill="cyan")
 
+    def add_fish_spot_on_click(self, tags):
+        """Ajoute un point de pêche à la carte actuelle en cliquant sur la grille."""
+        _, item_data_str = tags
+        grid_coord = tuple(map(int, item_data_str.strip('()').split(',')))
+        
+        map_coords = get_map_coordinates()
+        if not map_coords:
+            messagebox.showerror("Erreur", "Impossible de lire les coordonnées de la carte actuelle.")
+            return
+
+        try:
+            map_data = load_map_data(map_coords)
+        except FileNotFoundError:
+            map_data = {"map": map_coords, "cells": [], "exits": {}}
+
+        screen_pos = grid_instance.cells.get(grid_coord)
+        if not screen_pos: return
+
+        map_data.setdefault("cells", []).append({"x": screen_pos[0], "y": screen_pos[1]})
+        
+        with open(f"Maps/{map_coords}.json", "w") as f:
+            json.dump(map_data, f, indent=4)
+        self.log_to_widget(f"[GUI] Point de pêche ajouté à la case {grid_coord} sur la carte {map_coords}.")
+        self.draw_map()
+
     def calibrate_grid(self):
-        """Lance le processus d'étalonnage de la grille dans un thread séparé."""
         threading.Thread(target=grid_instance.calibrate, daemon=True).start()
 
     def delete_selected_map_item(self, event):
-        """Supprime un élément de la carte après confirmation."""
-        if not self.selected_map_item: return # Rien n'est sélectionné
-        item_type, item_data = self.selected_map_item # item_data est un tuple (q, r)
+        if not self.selected_map_item: return
+        item_type, item_data = self.selected_map_item
 
         coords = get_map_coordinates()
         if not coords: return
@@ -621,11 +663,9 @@ class GuiApp(tk.Tk):
             try:
                 map_data = load_map_data(coords)
                 if item_type == "cell":
-                    # On doit retrouver la cellule par coordonnée de grille
                     cells_to_keep = [c for c in map_data.get("cells", []) if grid_instance.get_cell_from_screen_coords(c['x'], c['y']) != item_data]
                     map_data["cells"] = cells_to_keep
                 elif item_type == "exit":
-                    # On doit retrouver la sortie par coordonnée de grille
                     exit_to_delete = None
                     for direction, pos_data in map_data.get("exits", {}).items():
                         if grid_instance.get_cell_from_screen_coords(pos_data['x'], pos_data['y']) == item_data:
@@ -638,7 +678,7 @@ class GuiApp(tk.Tk):
                     json.dump(map_data, f, indent=4)
                 
                 self.log_to_widget(f"[GUI] Point {item_data} supprimé de la carte {coords}.")
-                self.selected_map_item = None # Désélectionner l'élément
+                self.selected_map_item = None
                 self.draw_map()
             except Exception as e:
                 self.log_to_widget(f"[GUI] Erreur lors de la suppression : {e}")
@@ -648,9 +688,14 @@ class GuiApp(tk.Tk):
             config = json.load(f)
         keybinds_config = config.get("KEYBINDS", {})
         map_keys_config = config.get("MAP_CREATION_KEYS", {})
-        all_keys = {**keybinds_config, **map_keys_config}
+        pos_config = config.get("POSITIONS", {})
+
         for key_id, (var, _) in self.key_vars.items():
-            var.set(all_keys.get(key_id, ''))
+            if "POS" in key_id:
+                pos_value = pos_config.get(key_id, [])
+                var.set(','.join(map(str, pos_value)) if pos_value else '')
+            else:
+                var.set(keybinds_config.get(key_id) or map_keys_config.get(key_id, ''))
 
         combat_config = config.get("COMBAT", {})
         self.pa_var.set(combat_config.get("ACTION_POINTS", 6))
@@ -674,15 +719,24 @@ class GuiApp(tk.Tk):
             
             keybinds_config = {}
             map_keys_config = {}
+            pos_config = {}
+
             for key_id, (var, _) in self.key_vars.items():
-                if key_id in ["PAUSE_RESUME", "MOVE_UP", "MOVE_DOWN", "MOVE_LEFT", "MOVE_RIGHT"]:
-                    keybinds_config[key_id] = var.get()
+                value = var.get()
+                if "POS" in key_id:
+                    try:
+                        pos_config[key_id] = [int(v.strip()) for v in value.split(',')] if value else []
+                    except ValueError:
+                        pos_config[key_id] = []
+                elif key_id in ["PAUSE_RESUME", "MOVE_UP", "MOVE_DOWN", "MOVE_LEFT", "MOVE_RIGHT"]:
+                    keybinds_config[key_id] = self._format_hotkey_for_save(value)
                 else:
-                    map_keys_config[key_id] = var.get()
+                    map_keys_config[key_id] = self._format_hotkey_for_save(value)
             config["KEYBINDS"] = keybinds_config
             config["MAP_CREATION_KEYS"] = map_keys_config
 
             self.setup_global_hotkeys()
+            config["POSITIONS"] = pos_config
 
             combat_config = config.get("COMBAT", {})
             try:
@@ -710,8 +764,34 @@ class GuiApp(tk.Tk):
             f.truncate()
         self.log_to_widget("[GUI] Paramètres sauvegardés.")
 
+    def _format_hotkey_for_save(self, hotkey_str):
+        """Assure un formatage cohérent des raccourcis pour la sauvegarde."""
+        if not hotkey_str:
+            return ""
+        
+        parts = [p.strip() for p in hotkey_str.split('+')]
+        
+        key_map = {
+            'right ctrl': 'CtrlD', 'left ctrl': 'CtrlG',
+            'alt': 'Alt', 'alt gr': 'AltGr', 'shift': 'Maj',
+            'delete': 'Suppr', 'enter': 'Entrée', 'esc': 'Échap',
+            'up': 'Haut', 'down': 'Bas', 'left': 'Gauche', 'right': 'Droite'
+        }
+        
+        normalized_parts = set()
+        for p in parts:
+            if p in ['CtrlG', 'CtrlD', 'Alt', 'AltGr', 'Maj']:
+                normalized_parts.add(p)
+            else:
+                normalized_parts.add(key_map.get(p.lower(), p.capitalize()))
+        
+        modifiers_order = ['CtrlG', 'CtrlD', 'Alt', 'AltGr', 'Maj']
+        mods = sorted([p for p in normalized_parts if p in modifiers_order], key=lambda m: modifiers_order.index(m))
+        keys = sorted([p for p in normalized_parts if p not in mods])
+        
+        return "+".join(mods + keys)
+
     def add_spell(self):
-        """Ouvre une fenêtre pour ajouter un nouveau sort."""
         win = tk.Toplevel(self)
         win.title("Ajouter un sort")
         win.configure(bg='#2E2E2E')
@@ -764,7 +844,6 @@ class GuiApp(tk.Tk):
         ttk.Button(win, text="Ajouter", command=on_add).grid(row=6, columnspan=2, pady=10)
 
     def edit_spell(self):
-        """Ouvre une fenêtre pour modifier le sort sélectionné."""
         selected_item = self.spells_tree.selection()
         if not selected_item:
             messagebox.showwarning("Attention", "Veuillez sélectionner un sort à modifier.")
@@ -822,7 +901,6 @@ class GuiApp(tk.Tk):
 
 
     def remove_spell(self):
-        """Supprime le sort sélectionné."""
         selected_item = self.spells_tree.selection()
         if selected_item:
             self.spells_tree.delete(selected_item)

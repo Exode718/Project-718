@@ -7,22 +7,22 @@
     "FLOTTEUR_TIMEOUT": 16,
     "FLOTTEUR_CHECK_INTERVAL": 0.1,
     "KEYBINDS": {
-        "PAUSE_RESUME": "esc",
-        "MOVE_UP": "up",
-        "MOVE_DOWN": "down",
-        "MOVE_LEFT": "left",
-        "MOVE_RIGHT": "right"
+        "PAUSE_RESUME": "0+Ctrl droite",
+        "MOVE_UP": "Ctrl droite+Haut",
+        "MOVE_DOWN": "Bas+Ctrl droite",
+        "MOVE_LEFT": "Ctrl droite+Gauche",
+        "MOVE_RIGHT": "Ctrl droite+Droite"
     },
     "MAP_CREATION_KEYS": {
-        "ADD_SPOT": "5",
-        "EXIT_UP_LEFT": "7",
-        "EXIT_UP": "8",
-        "EXIT_UP_RIGHT": "9",
-        "EXIT_LEFT": "4",
-        "EXIT_RIGHT": "6",
-        "EXIT_DOWN_LEFT": "1",
-        "EXIT_DOWN": "2",
-        "EXIT_DOWN_RIGHT": "3"
+        "ADD_SPOT": "5+Ctrl droite",
+        "EXIT_UP_LEFT": "7+Ctrl droite",
+        "EXIT_UP": "8+Ctrl droite",
+        "EXIT_UP_RIGHT": "9+Ctrl droite",
+        "EXIT_LEFT": "4+Ctrl droite",
+        "EXIT_RIGHT": "6+Ctrl droite",
+        "EXIT_DOWN_LEFT": "1+Ctrl droite",
+        "EXIT_DOWN": "2+Ctrl droite",
+        "EXIT_DOWN_RIGHT": "3+Ctrl droite"
     },
     "COMBAT": {
         "ACTION_POINTS": 9,
@@ -53,5 +53,46 @@
                 "range_max": 8
             }
         ]
+    },
+    "GRID": {
+        "origin": [
+            529,
+            390
+        ],
+        "u_vec": [
+            96,
+            1
+        ],
+        "v_vec": [
+            48,
+            25
+        ]
+    },
+    "POSITIONS": {
+        "TACTICAL_MODE_POS": [
+            1173,
+            709
+        ],
+        "LOCK_MODE_POS": [
+            1219,
+            715
+        ],
+        "CREATURE_MODE_POS": [
+            1250,
+            713
+        ],
+        "READY_BUTTON_POS": [
+            1249,
+            763
+        ],
+        "END_TURN_BUTTON_POS": [
+            889,
+            987
+        ],
+        "FIGHT_END_CLOSE_POS": [
+            1002,
+            678
+        ],
+        "LEVEL_UP_OK_POS": []
     }
 }
