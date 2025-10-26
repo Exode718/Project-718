@@ -1,5 +1,4 @@
 import os
-import math
 import pyautogui
 import keyboard
 from tkinter import messagebox
@@ -7,28 +6,23 @@ import heapq
 from utils import log
 
 class Grid:
+    # --- Initialisation et Configuration ---
     def __init__(self):
         self.is_calibrated = False
         self.origin = (0, 0)
         self.u_vec = (0, 0)
         self.v_vec = (0, 0)
         self.cells = {}
+        self.cell_width = 96.5
+        self.cell_height = 49.5
         self.walkable_cells = set()
         self.los_transparent_cells = set()
-        self.tactical_colors = [
-            (185, 206, 113),  # #B9CE71 (Case marchable)
-            (171, 191, 105),  # #ABBF69 (Case marchable)
-            (180, 183, 112),  # #B4B770 (Case marchable)
-            (167, 170, 104),  # #A7AA68 (Case marchable)
-            (144, 168, 61),   # #90A83D (Sortie sur case marchable)
-            (137, 160, 57),   # #89A039 (Sortie sur case marchable, autre teinte)
-        ]
+        self.tactical_colors = [ (185, 206, 113), (171, 191, 105), (180, 183, 112), (167, 170, 104), (144, 168, 61), (137, 160, 57) ]
         self.load_config()
 
     def load_config(self):
         import json
         config_path = "config.json"
-        old_config_path = "grid_config.json"
 
         if os.path.exists("config.json"):
             try:
@@ -42,28 +36,18 @@ class Grid:
                     return
             except Exception as e:
                 log(f"[Grille] Erreur lors du chargement de la configuration : {e}")
-        
-        # --- Migration de l'ancienne configuration ---
-        if os.path.exists(old_config_path):
-            log(f"[Grille] Ancien fichier '{old_config_path}' trouvé. Tentative de migration...")
-            try:
-                with open(old_config_path, 'r') as f:
-                    old_grid_config = json.load(f)
-                self._apply_config(old_grid_config)
-                self.save_config()
-                os.remove(old_config_path)
-                log(f"[Grille] Migration réussie. '{old_config_path}' a été supprimé.")
-                return
-            except Exception as e:
-                log(f"[Grille] Échec de la migration : {e}")
 
         self.is_calibrated = False
         log("[Grille] Aucune configuration de grille valide trouvée.")
 
     def _apply_config(self, grid_config):
         self.origin = tuple(grid_config['origin'])
-        self.u_vec = tuple(grid_config['u_vec'])
-        self.v_vec = tuple(grid_config['v_vec'])
+        self.cell_width = grid_config.get('CELL_WIDTH', 96.5)
+        self.cell_height = grid_config.get('CELL_HEIGHT', 49.5)
+
+        self.u_vec = (self.cell_width / 2.0, self.cell_height / 2.0)
+        self.v_vec = (-self.cell_width / 2.0, self.cell_height / 2.0)
+
         self.is_calibrated = True
         self._generate_grid_coordinates()
 
@@ -75,24 +59,25 @@ class Grid:
         except (FileNotFoundError, json.JSONDecodeError):
             config = {}
         
-        config['GRID'] = {'origin': self.origin, 'u_vec': self.u_vec, 'v_vec': self.v_vec}
+        config['GRID'] = {
+            'origin': self.origin, 
+            'u_vec': self.u_vec, 
+            'v_vec': self.v_vec,
+            'CELL_WIDTH': self.cell_width,
+            'CELL_HEIGHT': self.cell_height
+        }
         
         with open("config.json", 'w') as f:
             json.dump(config, f, indent=4)
         log("[Grille] Configuration de la grille sauvegardée dans config.json.")
 
     def calibrate(self):
-        messagebox.showinfo("Étalonnage - Étape 1/3", "Survolez le centre d'une case (ex: votre case de départ) et appuyez sur 'Entrée'.")
+        messagebox.showinfo("Étalonnage de la grille", "Survolez le centre de n'importe quelle case (par exemple, la case (0,0)) et appuyez sur 'Entrée'.")
         self.origin = self._find_cell_center_from_point(self._wait_for_click())
         log(f"[Grille] Origine enregistrée : {self.origin}")
 
-        messagebox.showinfo("Étalonnage - Étape 2/3", "Survolez le centre de la case à DROITE de la précédente et appuyez sur 'Entrée'.")
-        p_right = self._find_cell_center_from_point(self._wait_for_click())
-        self.u_vec = (p_right[0] - self.origin[0], p_right[1] - self.origin[1])
-
-        messagebox.showinfo("Étalonnage - Étape 3/3", "Survolez le centre de la case en BAS à DROITE de la première et appuyez sur 'Entrée'.")
-        p_bottom_right = self._find_cell_center_from_point(self._wait_for_click())
-        self.v_vec = (p_bottom_right[0] - self.origin[0], p_bottom_right[1] - self.origin[1])
+        self.u_vec = (self.cell_width / 2.0, self.cell_height / 2.0)
+        self.v_vec = (-self.cell_width / 2.0, self.cell_height / 2.0)
         log(f"[Grille] Vecteur U (droite) calculé : {self.u_vec}, Vecteur V (bas-droite) calculé : {self.v_vec}")
 
         self.is_calibrated = True
@@ -100,6 +85,7 @@ class Grid:
         self._generate_grid_coordinates()
         messagebox.showinfo("Étalonnage Terminé", "La grille a été étalonnée avec succès.")
 
+    # --- Fonctions Utilitaires Internes ---
     def _colors_are_similar(self, c1, c2, tolerance=10):
         return c1 is not None and c2 is not None and all(abs(c1[i] - c2[i]) <= tolerance for i in range(3))
 
@@ -140,6 +126,7 @@ class Grid:
 
         return ((min_x + max_x) // 2, (min_y + max_y) // 2)
 
+    # --- Génération et Accès à la Grille ---
     def _generate_grid_coordinates(self):
         if not self.is_calibrated:
             return
@@ -148,15 +135,15 @@ class Grid:
         self.cells.clear()
         for r in range(-self.map_radius, self.map_radius + 1):
             for q in range(-self.map_radius, self.map_radius + 1):
-                if abs(q + r) <= self.map_radius:
-                    x = self.origin[0] + q * self.u_vec[0] + r * self.v_vec[0]
-                    y = self.origin[1] + q * self.u_vec[1] + r * self.v_vec[1]
-                    self.cells[(q, r)] = (int(x), int(y))
+                x = self.origin[0] + q * self.u_vec[0] + r * self.v_vec[0]
+                y = self.origin[1] + q * self.u_vec[1] + r * self.v_vec[1]
+                self.cells[(q, r)] = (int(x), int(y))
 
     def get_cell_from_screen_coords(self, x, y):
         if not self.is_calibrated:
             return None
 
+        import math
         closest_cell = None
         min_dist = float('inf')
 
@@ -168,6 +155,7 @@ class Grid:
         
         return closest_cell
     
+    # --- Logique de Combat ---
     def map_obstacles(self, color_tolerance=15, screenshot=None):
         if not self.cells or not self.tactical_colors:
             log("[Grille] Impossible de mapper les obstacles : grille non étalonnée ou couleurs tactiques non définies.")
@@ -179,50 +167,44 @@ class Grid:
         if screenshot is None:
             screenshot = pyautogui.screenshot()
 
-        # --- Scan en spirale pour la robustesse ---
-        spiral_moves = [(0, 0)]
+        scan_moves = [(0, 0)]
         for i in range(1, 4): # Rayon de 3 pixels
             for dx in range(-i, i + 1):
-                spiral_moves.append((dx, i))
-                spiral_moves.append((dx, -i))
+                scan_moves.append((dx, i))
+                scan_moves.append((dx, -i))
             for dy in range(-i + 1, i):
-                spiral_moves.append((i, dy))
-                spiral_moves.append((-i, dy))
+                scan_moves.append((i, dy))
+                scan_moves.append((-i, dy))
 
         black_color_threshold = 30
 
         for cell_coord, screen_pos in self.cells.items():
-            found_walkable = False
+            is_potentially_walkable = False
+            is_hole = False
 
-            # --- Étape 1: Chercher une couleur de case marchable (tactique) ---
-            for dx, dy in spiral_moves:
+            for dx, dy in scan_moves:
                 scan_x, scan_y = screen_pos[0] + dx, screen_pos[1] + dy
                 if not (0 <= scan_x < screenshot.width and 0 <= scan_y < screenshot.height):
                     continue
-                pixel_color = screenshot.getpixel((scan_x, scan_y))
-                if sum(pixel_color) < 50: # Ignorer les pixels très sombres
-                    continue
-                for tac_color in self.tactical_colors:
-                    if all(abs(pixel_color[i] - tac_color[i]) <= color_tolerance for i in range(3)):
-                        self.walkable_cells.add(cell_coord)
-                        self.los_transparent_cells.add(cell_coord)
-                        found_walkable = True
-                        break
-                if found_walkable:
-                    break
-            
-            # --- Étape 2: Si non marchable, vérifier si elle bloque la Ligne de Vue (LOS) ---
-            if not found_walkable:
-                has_black = False
-                for dx, dy in spiral_moves:
-                    scan_x, scan_y = screen_pos[0] + dx, screen_pos[1] + dy
-                    if not (0 <= scan_x < screenshot.width and 0 <= scan_y < screenshot.height):
-                        continue
+                try:
                     pixel_color = screenshot.getpixel((scan_x, scan_y))
+                    
                     if sum(pixel_color) < black_color_threshold:
-                        self.los_transparent_cells.add(cell_coord)
-                        has_black = True
-                        break
+                        is_hole = True
+                    
+                    if sum(pixel_color) >= 50:
+                        for tac_color in self.tactical_colors:
+                            if all(abs(pixel_color[i] - tac_color[i]) <= color_tolerance for i in range(3)):
+                                is_potentially_walkable = True
+                                break
+                except IndexError:
+                    pass
+            
+            if is_hole:
+                self.los_transparent_cells.add(cell_coord)
+            elif is_potentially_walkable:
+                self.walkable_cells.add(cell_coord) # Une case marchable est forcément transparente
+                self.los_transparent_cells.add(cell_coord)
 
         log(f"[Grille] Cartographie terminée : {len(self.walkable_cells)} cases marchables trouvées.")
 
@@ -235,42 +217,80 @@ class Grid:
         return [n for n in neighbors if n in self.walkable_cells]
 
     def get_distance(self, cell1, cell2):
-        return (abs(cell1[0] - cell2[0]) 
-              + abs(cell1[0] + cell1[1] - cell2[0] - cell2[1]) 
-              + abs(cell1[1] - cell2[1])) / 2
+        if cell1 == cell2:
+            return 0
+        q1, r1 = cell1
+        q2, r2 = cell2
+        return abs(q1 - q2) + abs(r1 - r2)
+
+    def get_path_distance(self, start, end):
+        path = self.find_path(start, end)
+        if path and len(path) > 1:
+            return len(path) - 1
+        elif path and len(path) == 1:
+            return 0
+        return float('inf')
+
+    def get_move_cost(self, cell1, cell2):
+        q1, r1 = cell1
+        q2, r2 = cell2
+        return abs(q1 - q2) + abs(r1 - r2)
+
+    def get_farthest_walkable_cell(self, path, max_cost):
+        if not path or len(path) < 2:
+            return path[0] if path else None
+
+        current_cost = 0
+        for i in range(len(path) - 1):
+            cost_to_next = self.get_move_cost(path[i], path[i+1])
+            if current_cost + cost_to_next > max_cost:
+                return path[i]
+            current_cost += cost_to_next
+        
+        return path[-1]
+
+    # --- Calculs pour la Grille Hexagonale ---
+    def _axial_to_cube(self, cell):
+        q, r = cell
+        return (q, r, -q - r)
+
+    def _cube_round(self, cube):
+        rx, ry, rz = round(cube[0]), round(cube[1]), round(cube[2])
+        x_diff, y_diff, z_diff = abs(rx - cube[0]), abs(ry - cube[1]), abs(rz - cube[2])
+        if x_diff > y_diff and x_diff > z_diff:
+            rx = -ry - rz
+        elif y_diff > z_diff:
+            ry = -rx - rz
+        else:
+            rz = -rx - ry
+        return (int(rx), int(ry), int(rz))
+
+    def _cube_to_axial(self, cube):
+        return (cube[0], cube[1])
 
     def has_line_of_sight(self, start, end):
-        if start not in self.walkable_cells or end not in self.walkable_cells:
-            return False
+        if start == end:
+            return True
+            
+        n = self.get_distance(start, end)
+        if n == 0: return True
 
-        line_cells = []
-        x0, y0 = start
-        x1, y1 = end
-        dx = abs(x1 - x0)
-        dy = abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx - dy
-
-        while True:
-            line_cells.append((x0, y0))
-            if x0 == x1 and y0 == y1:
-                break
-            e2 = 2 * err
-            if e2 > -dy:
-                err -= dy
-                x0 += sx
-            if e2 < dx:
-                err += dx
-                y0 += sy
+        start_cube = self._axial_to_cube(start)
+        end_cube = self._axial_to_cube(end)
         
-        for cell in line_cells[1:-1]:
-            if cell not in self.los_transparent_cells:
+        line_cells = []
+        for i in range(1, n):
+            interp_cube = tuple(start_cube[j] + (end_cube[j] - start_cube[j]) * i / n for j in range(3))
+            line_cells.append(self._cube_to_axial(self._cube_round(interp_cube)))
+            
+        for cell in line_cells:
+            if cell != end and cell not in self.los_transparent_cells:
+                log(f"[Debug LdV] Ligne de vue de {start} à {end} bloquée par {cell}.")
                 return False
         return True
 
     def find_path(self, start, end):
-        if start not in self.walkable_cells or end not in self.walkable_cells:
+        if start not in self.walkable_cells:
             return None
 
         frontier = [(0, start)]
@@ -278,21 +298,37 @@ class Grid:
         cost_so_far = {start: 0}
 
         while frontier:
-            _, current = heapq.heappop(frontier)
+            current_priority, current = heapq.heappop(frontier)
 
-            if current == end:
-                path = []
-                while current is not None:
-                    path.append(current)
-                    current = came_from[current]
-                return path[::-1]
-
+            if current == end and current in self.walkable_cells:
+                break
+            
             for next_cell in self.get_neighbors(current):
-                new_cost = cost_so_far[current] + 1
+                new_cost = cost_so_far[current] + self.get_move_cost(current, next_cell)
                 if next_cell not in cost_so_far or new_cost < cost_so_far[next_cell]:
                     cost_so_far[next_cell] = new_cost
                     priority = new_cost + self.get_distance(end, next_cell)
                     heapq.heappush(frontier, (priority, next_cell))
-        return None
+                    came_from[next_cell] = current
+
+        closest_cell_to_target = start
+        min_dist_to_target = self.get_distance(start, end)
+
+        for cell in cost_so_far:
+            dist = self.get_distance(cell, end)
+            if dist < min_dist_to_target:
+                min_dist_to_target = dist
+                closest_cell_to_target = cell
+
+        if closest_cell_to_target is None:
+            return None
+
+        path = []
+        current = closest_cell_to_target
+        while current is not None:
+            path.append(current)
+            current = came_from.get(current)
+        
+        return path[::-1] if path else None
 
 grid_instance = Grid()

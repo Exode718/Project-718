@@ -10,6 +10,7 @@ from PIL import ImageGrab, Image
 from utils import log, is_red_present, check_and_close_levelup_popup, is_fight_started, check_for_pause, is_stop_requested
 from fight import handle_fight
 
+# --- Configuration Globale ---
 with open("config.json", "r") as f:
     CONFIG = json.load(f)
 
@@ -21,6 +22,7 @@ CURSOR_RESET_DURATION = CONFIG["CURSOR_RESET_DURATION"]
 FLOTTEUR_TIMEOUT = CONFIG["FLOTTEUR_TIMEOUT"]
 FLOTTEUR_CHECK_INTERVAL = CONFIG["FLOTTEUR_CHECK_INTERVAL"]
 
+# --- Constantes ---
 MAP_FOLDER = "Maps"
 IMAGE_FOLDER = "Images"
 PECHER_IMAGE = os.path.join(IMAGE_FOLDER, "button_fish.png")
@@ -35,6 +37,7 @@ def get_move_request():
     global move_request_direction
     return move_request_direction
 
+# --- Fonctions de Pêche ---
 
 def capture_zone(x, y, size=10):
     box = (x - size, y - size, x + size, y + size)
@@ -94,6 +97,7 @@ def wait_for_fishing_cycle_color(x, y, min_delay=FISHING_DELAY_MIN, max_delay=FI
     return False
 
 def run_fishing_cycle(map_coords, map_data, gui_app, target_direction):
+    # --- Logique principale du cycle de pêche ---
     check_for_pause()
     global move_request_direction
     move_request_direction = None
@@ -146,11 +150,11 @@ def run_fishing_cycle(map_coords, map_data, gui_app, target_direction):
 
             if find_and_click_pecher_button():
                 reset_cursor_to_case(x, y)
-                gui_app.after(0, gui_app.highlight_spot, cell, "lightgreen") # Changement de couleur immédiat
+                gui_app.after(0, gui_app.highlight_spot, cell, "lightgreen")
                 
                 is_fishing = wait_for_fishing_cycle_color(x, y, min_delay=FISHING_START_DELAY)
                 
-                check_and_close_levelup_popup() # On vérifie les popups même si la pêche a échoué
+                check_and_close_levelup_popup()
                 if is_fight_started():
                     auto_combat_enabled = gui_app.auto_combat_var.get()
                     handle_fight(auto_combat_enabled, gui_app)
