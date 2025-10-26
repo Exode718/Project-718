@@ -7,22 +7,22 @@
     "FLOTTEUR_TIMEOUT": 16,
     "FLOTTEUR_CHECK_INTERVAL": 0.1,
     "KEYBINDS": {
-        "PAUSE_RESUME": "0+Ctrl droite",
+        "PAUSE_RESUME": "Ctrl droite+0",
         "MOVE_UP": "Ctrl droite+Haut",
-        "MOVE_DOWN": "Bas+Ctrl droite",
+        "MOVE_DOWN": "Ctrl droite+Bas",
         "MOVE_LEFT": "Ctrl droite+Gauche",
         "MOVE_RIGHT": "Ctrl droite+Droite"
     },
     "MAP_CREATION_KEYS": {
-        "ADD_SPOT": "5+Ctrl droite",
-        "EXIT_UP_LEFT": "7+Ctrl droite",
-        "EXIT_UP": "8+Ctrl droite",
-        "EXIT_UP_RIGHT": "9+Ctrl droite",
-        "EXIT_LEFT": "4+Ctrl droite",
-        "EXIT_RIGHT": "6+Ctrl droite",
-        "EXIT_DOWN_LEFT": "1+Ctrl droite",
-        "EXIT_DOWN": "2+Ctrl droite",
-        "EXIT_DOWN_RIGHT": "3+Ctrl droite"
+        "ADD_SPOT": "Ctrl droite+5",
+        "EXIT_UP_LEFT": "Ctrl droite+7",
+        "EXIT_UP": "Ctrl droite+8",
+        "EXIT_UP_RIGHT": "Ctrl droite+9",
+        "EXIT_LEFT": "Ctrl droite+4",
+        "EXIT_RIGHT": "Ctrl droite+6",
+        "EXIT_DOWN_LEFT": "Ctrl droite+1",
+        "EXIT_DOWN": "Ctrl droite+2",
+        "EXIT_DOWN_RIGHT": "Ctrl droite+3"
     },
     "COMBAT": {
         "ACTION_POINTS": 9,
@@ -34,7 +34,8 @@
                 "cost": 4,
                 "priority": 3,
                 "range_min": 1,
-                "range_max": 6
+                "range_max": 6,
+                "casts_per_turn": 99
             },
             {
                 "name": "Attaque Naturelle",
@@ -42,7 +43,8 @@
                 "cost": 3,
                 "priority": 2,
                 "range_min": 1,
-                "range_max": 8
+                "range_max": 8,
+                "casts_per_turn": 99
             },
             {
                 "name": "Flamiche",
@@ -50,23 +52,26 @@
                 "cost": 2,
                 "priority": 1,
                 "range_min": 1,
-                "range_max": 8
+                "range_max": 9,
+                "casts_per_turn": 3
             }
         ]
     },
     "GRID": {
         "origin": [
-            529,
-            390
+            672,
+            416
         ],
         "u_vec": [
-            96,
-            1
+            48.0,
+            24.5
         ],
         "v_vec": [
-            48,
-            25
-        ]
+            -48.0,
+            24.5
+        ],
+        "CELL_WIDTH": 96.0,
+        "CELL_HEIGHT": 49.0
     },
     "POSITIONS": {
         "TACTICAL_MODE_POS": [
@@ -78,16 +83,16 @@
             715
         ],
         "CREATURE_MODE_POS": [
-            1250,
-            713
+            1251,
+            712
         ],
         "READY_BUTTON_POS": [
             1249,
             763
         ],
         "END_TURN_BUTTON_POS": [
-            889,
-            987
+            894,
+            991
         ],
         "FIGHT_END_CLOSE_POS": [
             1002,

@@ -5,10 +5,10 @@ from PIL import ImageGrab
 from datetime import datetime
 import pyautogui
 
+# --- Constantes ---
 RED_RGB = (204, 0, 0)
 RED_TOLERANCE = 0
 
-# --- Global State Management ---
 stop_requested = False
 is_paused = False
 
@@ -32,6 +32,7 @@ def check_for_pause():
 
 log_callback = None
 
+# --- Fonctions Utilitaires ---
 def set_log_callback(callback):
     global log_callback
     log_callback = callback

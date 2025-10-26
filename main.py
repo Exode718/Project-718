@@ -12,6 +12,7 @@ from PIL import ImageGrab
 import pyautogui
 from tkinter import messagebox
 
+# --- Constantes ---
 MAP_FOLDER = "Maps"
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
@@ -19,6 +20,7 @@ def request_map_change(direction):
     set_move_request(direction)
 
 def get_map_coordinates_single_pass():
+    # --- OCR pour les coordonnées de la carte ---
     screenshot = ImageGrab.grab()
     crop_box = (0, 85, 300, 110)
     cropped = screenshot.crop(crop_box)
@@ -52,6 +54,7 @@ def prompt_yes_no(message):
     return messagebox.askyesno("Création de map", message)
 
 def load_cells(map_coords):
+    # --- Gestion des fichiers de carte ---
     path = os.path.join(MAP_FOLDER, f"{map_coords}.json")
     try:
         if not os.path.exists(path):
@@ -64,6 +67,7 @@ def load_cells(map_coords):
     return data["cells"]
 
 def create_map_interactively(map_coords, config, is_editing=False):
+    # --- Outil de création de carte interactif ---
     import pyautogui, keyboard
     if not is_editing:
         log(f"Aucune donnée pour la map {map_coords}. Lancement de l'outil de création.")
@@ -148,7 +152,6 @@ def load_map_data(map_coords):
         return json.load(f)
 
 def get_next_map_coords(current_coords_str, direction):
-    """Calcule les coordonnées de la carte de destination."""
     x, y = map(int, current_coords_str.split(','))
     
     moves = {
@@ -193,6 +196,7 @@ def wait_for_map_change(old_coords, timeout=20):
     return False
 
 def main_bot_logic(log_cb, finish_cb):
+    # --- Logique principale du bot ---
     set_log_callback(log_cb)
     
     with open("config.json", "r") as f:
@@ -203,7 +207,6 @@ def main_bot_logic(log_cb, finish_cb):
     previous_coords = None
 
     try:
-        # --- Vérification initiale de l'état de combat ---
         if gui_app.auto_combat_var.get():
             log("Vérification de l'état de combat au démarrage...")
             if is_fight_started(template_path="Images/button_end_turn.png", checks=1):
@@ -221,7 +224,6 @@ def main_bot_logic(log_cb, finish_cb):
         while not is_stop_requested():
             check_for_pause()
 
-            # --- Mode "Combat Only" ---
             if gui_app.combat_only_var.get():
                 log("Mode 'Combat Only' activé. En attente d'un combat...")
                 while not is_fight_started() and not is_stop_requested():
@@ -236,7 +238,6 @@ def main_bot_logic(log_cb, finish_cb):
                 log("Reprise des activités après le combat.")
                 continue
             
-            # --- Scan rapide pour les agressions (hors pêche) ---
             if gui_app.auto_combat_var.get() and not gui_app.combat_only_var.get():
                 if is_fight_started(checks=1, interval=0):
                     continue
