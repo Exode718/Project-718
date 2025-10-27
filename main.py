@@ -1,4 +1,4 @@
-from fishing import run_fishing_cycle, set_move_request
+from fishing import run_fishing_cycle
 from utils import log, set_log_callback, is_stop_requested, check_for_pause
 from fight import handle_fight, is_fight_started
 import pytesseract
@@ -15,9 +15,6 @@ from tkinter import messagebox
 # --- Constantes ---
 MAP_FOLDER = "Maps"
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-
-def request_map_change(direction):
-    set_move_request(direction)
 
 def get_map_coordinates_single_pass():
     # --- OCR pour les coordonnées de la carte ---
@@ -184,15 +181,31 @@ def find_exit_with_fallback(map_data, primary_direction):
             return fallback
     return None
 
-def wait_for_map_change(old_coords, timeout=20):
+def wait_for_map_change(old_coords, timeout=10, check_interval=0.5):
     start_time = time.time()
     while time.time() - start_time < timeout:
         new_coords = get_map_coordinates()
         if new_coords and new_coords != old_coords:
             log(f"[Trajet] Déplacement réussi vers : {new_coords}.")
             return True
-        time.sleep(0.5)
+        time.sleep(check_interval)
     log("[Trajet] Timeout : le changement de map n'a pas été détecté.")
+    return False
+
+def perform_map_change(current_coords, map_data, direction, max_retries=3):
+    """Tente de changer de carte avec plusieurs essais."""
+    final_direction = find_exit_with_fallback(map_data, direction)
+    if not final_direction:
+        log(f"[Trajet] Aucune sortie trouvée pour la direction '{direction}'.")
+        return False
+
+    exit_pos = map_data["exits"][final_direction]
+    for attempt in range(max_retries):
+        log(f"[Trajet] Tentative de déplacement vers '{final_direction}' (Essai {attempt + 1}/{max_retries}).")
+        pyautogui.click(exit_pos["x"], exit_pos["y"])
+        if wait_for_map_change(current_coords):
+            return True
+        log(f"[Trajet] Le changement de map a échoué. Nouvel essai...")
     return False
 
 def main_bot_logic(log_cb, finish_cb):
@@ -241,11 +254,6 @@ def main_bot_logic(log_cb, finish_cb):
                     time.sleep(2)
                 continue
             
-            if gui_app.auto_combat_var.get() and not gui_app.combat_only_var.get():
-                if is_fight_started(checks=1, interval=0):
-                    continue
-                time.sleep(3)
-
             coords = get_map_coordinates()
             if not coords:
                 log("Impossible de détecter les coordonnées de la map. Nouvel essai dans 10s.")
@@ -299,37 +307,23 @@ def main_bot_logic(log_cb, finish_cb):
                 target_direction = previous_map_option
 
             log(f"{len(map_data.get('cells', []))} cases pêchables sur la map {coords}.")
+            
+            # Exécuter le cycle de pêche, mais vérifier les demandes de mouvement en parallèle
             cycle_completed = run_fishing_cycle(coords, map_data, gui_app, target_direction)
             
-            if is_stop_requested():
-                break
-
-            if not cycle_completed:
-                from fishing import get_move_request
-                move_direction = get_move_request()
-                if move_direction:
-                    log(f"[Trajet] Déplacement demandé vers '{move_direction}'.")
-                    map_data = load_map_data(coords)
-                    final_direction = find_exit_with_fallback(map_data, move_direction)
-
-                    if final_direction:
-                        exit_pos = map_data["exits"][final_direction]
-                        pyautogui.click(exit_pos["x"], exit_pos["y"])
-                        log(f"[Trajet] Clic sur la sortie '{final_direction}'. Attente du changement de map...")
-                    else:
-                        log(f"[Trajet] Aucune sortie trouvée pour la direction '{move_direction}'.")
-            
-            elif cycle_completed:
+            if cycle_completed:
                 if target_direction:
-                    log(f"[Trajet] Cycle de pêche terminé. Déplacement vers '{target_direction}'.")
-                    exit_pos = map_data["exits"][target_direction]
-                    pyautogui.click(exit_pos["x"], exit_pos["y"])
-                    if wait_for_map_change(coords):
+                    if perform_map_change(coords, map_data, target_direction):
                         gui_app.after(100, gui_app.draw_map) 
-
+                    else:
+                        log(f"[Trajet] Échec du déplacement vers '{target_direction}' après plusieurs tentatives. Arrêt.")
+                        break
                 else:
                     log("[Trajet] Aucune carte adjacente connue trouvée. Le bot s'arrête.")
                     break
+
+            if is_stop_requested():
+                break
 
             previous_coords = coords
 

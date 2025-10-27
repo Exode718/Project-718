@@ -78,7 +78,7 @@ def find_on_screen(template_path, threshold=0.8, bbox=None):
 def is_my_turn(timeout=2):
     start_time = time.time()
     while time.time() - start_time < timeout:
-        if find_on_screen(MY_TURN_INDICATOR_IMAGE, threshold=0.85):
+        if find_on_screen(MY_TURN_INDICATOR_IMAGE, threshold=0.95): # Augmentation du seuil pour éviter les faux positifs
             return True
         time.sleep(0.2)
     return False
@@ -95,26 +95,26 @@ def wait_for_next_turn(timeout=30):
     return False
 
 def ensure_mode_is_on(off_image, on_image, mode_name, retries=3, delay=0.5):
+    # 1. Vérifier si le mode est déjà activé
     if find_on_screen(on_image, threshold=0.9):
         log(f"[Combat Auto] {mode_name} est déjà activé.")
         return True
 
+    # 2. Tenter d'activer le mode si le bouton 'off' est trouvé
     for i in range(retries):
         off_button_pos = find_on_screen(off_image, threshold=0.9)
         if off_button_pos:
             log(f"[Combat Auto] {mode_name} est désactivé. Tentative d'activation ({i+1}/{retries})...")
             pyautogui.click(off_button_pos[0], off_button_pos[1])
             time.sleep(delay)
+            # Vérifier si l'activation a réussi
             if find_on_screen(on_image, threshold=0.9):
                 log(f"[Combat Auto] {mode_name} activé avec succès.")
                 return True
-        else:
-            log(f"[Combat Auto] Impossible de trouver le bouton '{mode_name}' (off). Vérification s'il est déjà activé.")
-            if find_on_screen(on_image, threshold=0.9):
-                log(f"[Combat Auto] {mode_name} est bien activé.")
-                return True
+        # Si le bouton 'off' n'est pas trouvé, ou si l'activation a échoué, on logue et on réessaye (si retries > 1)
+        log(f"[Combat Auto] Impossible de trouver le bouton '{mode_name}' (off) ou l'activation a échoué. Ré-essai...")
 
-    log(f"[Combat Auto] ÉCHEC CRITIQUE de l'activation de {mode_name} après {retries} tentatives.")
+    log(f"[Combat Auto] AVERTISSEMENT: Échec de l'activation de {mode_name} après {retries} tentatives. Le combat peut être instable.")
     return False
 
 def find_cells_by_color(target_color_rgb, tolerance=50, min_area=200, bbox=None):
@@ -383,7 +383,11 @@ def handle_fight_auto(gui_app=None):
     game_area = (0, 24, 1348, 808)
 
     # --- Boucle principale de combat ---
-    while not check_and_close_fight_end_popup():
+    combat_is_finished = False
+    while not combat_is_finished:
+        if check_and_close_fight_end_popup():
+            combat_is_finished = True
+            break
         if is_stop_requested(): return
         check_for_pause()
 
@@ -401,8 +405,7 @@ def handle_fight_auto(gui_app=None):
 
         # --- Analyse du terrain ---
         if not combat_modes_checked:
-            ensure_mode_is_on("Images/creature_mode_off.png", "Images/creature_mode_on.png", "Mode Créature")
-            if not ensure_mode_is_on("Images/creature_mode_off.png", "Images/creature_mode_on.png", "Mode Créature"):
+            if not ensure_mode_is_on("Images/creature_mode_off.png", "Images/creature_mode_on.png", "Mode Créature"): # Appel unique
                 log("[Combat Auto] Le mode créature n'a pas pu être activé. Passage du tour.")
                 pyautogui.press('f1')
                 time.sleep(2)
@@ -414,7 +417,7 @@ def handle_fight_auto(gui_app=None):
         time.sleep(0.5)
         screenshot_pil = ImageGrab.grab(bbox=game_area)
         grid_instance.map_obstacles(screenshot=screenshot_pil, color_tolerance=0)
-        time.sleep(0.1)
+        time.sleep(0.5)
         
         player_positions_with_scores = find_entities_by_image(ALLY_TEMPLATES, screenshot_pil, y_compensation_factor=1.8)
         combat_state.player_positions = [pos for pos, score in player_positions_with_scores]
@@ -507,10 +510,12 @@ def handle_fight_auto(gui_app=None):
                 pyautogui.moveTo(100, 100, duration=0.1)
                 if check_and_close_fight_end_popup():
                     fight_over = True
+                    combat_is_finished = True
                 update_targets_after_action(game_area)
 
             if fight_over or check_and_close_fight_end_popup():
                 fight_over = True
+                combat_is_finished = True
                 break
 
             if action_taken: continue
@@ -565,12 +570,8 @@ def handle_fight_auto(gui_app=None):
                                 log(f"[Combat Auto] Erreur: La case de destination {move_target_cell} est invalide.")
                         else:
                             log("[Combat Auto] Déplacement PM insuffisant pour attaquer. Évaluation du sort de mouvement.")
-
+                
                 if not action_taken:
-                    if current_pa < movement_spell_cost:
-                        log(f"[Combat Auto] Pas assez de PA pour utiliser un sort de mouvement (coût: {movement_spell_cost}).")
-                        break
-
                     # --- Logique de sort de Mouvement ---
                     movement_spell = next((s for s in SPELLS if s.get('is_movement')), None)
                     can_use_movement_spell = False
@@ -585,6 +586,11 @@ def handle_fight_auto(gui_app=None):
                             can_use_movement_spell = True
 
                     if can_use_movement_spell:
+                        movement_spell_cost = movement_spell['cost']
+                        if current_pa < movement_spell_cost:
+                            log(f"[Combat Auto] Pas assez de PA pour utiliser un sort de mouvement (coût: {movement_spell_cost}).")
+                            break
+
                         log(f"[Combat Auto] Évaluation de l'utilisation de '{movement_spell['name']}' pour se rapprocher.")
                         path_to_target = grid_instance.find_path(player_pos, target)
                         if path_to_target:
@@ -621,6 +627,9 @@ def handle_fight_auto(gui_app=None):
                         log("[Combat Auto] Bouton 'Passer son tour' non trouvé, appui sur F1 en fallback.")
                         time.sleep(2)
                         pyautogui.press('f1')
+                else:
+                    combat_is_finished = True
+
                 break
 
         time.sleep(2)
