@@ -208,6 +208,7 @@ def main_bot_logic(log_cb, finish_cb):
 
     try:
         if gui_app.auto_combat_var.get():
+            pyautogui.moveTo(100, 100, duration=0.1)
             log("Vérification de l'état de combat au démarrage...")
             if is_fight_started(template_path="Images/button_end_turn.png", checks=1):
                 log("Combat déjà en cours détecté (tour de jeu). Lancement de la gestion.")
@@ -232,10 +233,12 @@ def main_bot_logic(log_cb, finish_cb):
                 if is_stop_requested(): break
 
             if is_fight_started():
-                log("COMBAT DÉTECTÉ (inattendu) ! Lancement de la gestion du combat.")
-                auto_combat_enabled = gui_app.auto_combat_var.get()
-                handle_fight(auto_combat_enabled, gui_app)
-                log("Reprise des activités après le combat.")
+                if not gui_app.in_combat_view:
+                    log("COMBAT DÉTECTÉ (inattendu) ! Lancement de la gestion du combat.")
+                    auto_combat_enabled = gui_app.auto_combat_var.get()
+                    handle_fight(auto_combat_enabled, gui_app)
+                    log("Reprise des activités après le combat.")
+                    time.sleep(2)
                 continue
             
             if gui_app.auto_combat_var.get() and not gui_app.combat_only_var.get():

@@ -7,27 +7,39 @@
     "FLOTTEUR_TIMEOUT": 16,
     "FLOTTEUR_CHECK_INTERVAL": 0.1,
     "KEYBINDS": {
-        "PAUSE_RESUME": "Ctrl droite+0",
+        "PAUSE_RESUME": "0+Ctrl droite",
         "MOVE_UP": "Ctrl droite+Haut",
-        "MOVE_DOWN": "Ctrl droite+Bas",
+        "MOVE_DOWN": "Bas+Ctrl droite",
         "MOVE_LEFT": "Ctrl droite+Gauche",
         "MOVE_RIGHT": "Ctrl droite+Droite"
     },
     "MAP_CREATION_KEYS": {
-        "ADD_SPOT": "Ctrl droite+5",
-        "EXIT_UP_LEFT": "Ctrl droite+7",
-        "EXIT_UP": "Ctrl droite+8",
-        "EXIT_UP_RIGHT": "Ctrl droite+9",
-        "EXIT_LEFT": "Ctrl droite+4",
-        "EXIT_RIGHT": "Ctrl droite+6",
-        "EXIT_DOWN_LEFT": "Ctrl droite+1",
-        "EXIT_DOWN": "Ctrl droite+2",
-        "EXIT_DOWN_RIGHT": "Ctrl droite+3"
+        "ADD_SPOT": "5+Ctrl droite",
+        "EXIT_UP_LEFT": "7+Ctrl droite",
+        "EXIT_UP": "8+Ctrl droite",
+        "EXIT_UP_RIGHT": "9+Ctrl droite",
+        "EXIT_LEFT": "4+Ctrl droite",
+        "EXIT_RIGHT": "6+Ctrl droite",
+        "EXIT_DOWN_LEFT": "1+Ctrl droite",
+        "EXIT_DOWN": "2+Ctrl droite",
+        "EXIT_DOWN_RIGHT": "3+Ctrl droite"
     },
     "COMBAT": {
         "ACTION_POINTS": 9,
         "MOVEMENT_POINTS": 5,
         "SPELLS": [
+            {
+                "name": "Teleportation",
+                "key": "Ctrl+&",
+                "cost": 5,
+                "priority": 0,
+                "range_min": 1,
+                "range_max": 8,
+                "casts_per_turn": 1,
+                "cooldown": 6,
+                "is_movement": true,
+                "requires_los": false
+            },
             {
                 "name": "Attaque Nuageuse",
                 "key": "&",
@@ -35,7 +47,9 @@
                 "priority": 3,
                 "range_min": 1,
                 "range_max": 6,
-                "casts_per_turn": 99
+                "casts_per_turn": 99,
+                "is_movement": false,
+                "requires_los": true
             },
             {
                 "name": "Attaque Naturelle",
@@ -44,7 +58,9 @@
                 "priority": 2,
                 "range_min": 1,
                 "range_max": 8,
-                "casts_per_turn": 99
+                "casts_per_turn": 99,
+                "is_movement": false,
+                "requires_los": true
             },
             {
                 "name": "Flamiche",
@@ -53,7 +69,9 @@
                 "priority": 1,
                 "range_min": 1,
                 "range_max": 9,
-                "casts_per_turn": 3
+                "casts_per_turn": 3,
+                "is_movement": false,
+                "requires_los": true
             }
         ]
     },
@@ -83,8 +101,8 @@
             715
         ],
         "CREATURE_MODE_POS": [
-            1251,
-            712
+            1250,
+            710
         ],
         "READY_BUTTON_POS": [
             1249,

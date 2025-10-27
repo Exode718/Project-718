@@ -1,6 +1,8 @@
 import os
 import pyautogui
 import keyboard
+import cv2
+import numpy as np
 from tkinter import messagebox
 import heapq
 from utils import log
@@ -17,7 +19,10 @@ class Grid:
         self.cell_height = 49.5
         self.walkable_cells = set()
         self.los_transparent_cells = set()
-        self.tactical_colors = [ (185, 206, 113), (171, 191, 105), (180, 183, 112), (167, 170, 104), (144, 168, 61), (137, 160, 57) ]
+        self.walkable_cell_colors_rgb = [
+            (171, 191, 105),  # ABBF69
+            (185, 206, 113),  # B9CE71
+        ]
         self.load_config()
 
     def load_config(self):
@@ -156,8 +161,8 @@ class Grid:
         return closest_cell
     
     # --- Logique de Combat ---
-    def map_obstacles(self, color_tolerance=15, screenshot=None):
-        if not self.cells or not self.tactical_colors:
+    def map_obstacles(self, screenshot=None, **kwargs):
+        if not self.cells:
             log("[Grille] Impossible de mapper les obstacles : grille non étalonnée ou couleurs tactiques non définies.")
             return
 
@@ -166,9 +171,9 @@ class Grid:
         
         if screenshot is None:
             screenshot = pyautogui.screenshot()
-
+        
         scan_moves = [(0, 0)]
-        for i in range(1, 4): # Rayon de 3 pixels
+        for i in range(1, 4):
             for dx in range(-i, i + 1):
                 scan_moves.append((dx, i))
                 scan_moves.append((dx, -i))
@@ -176,34 +181,41 @@ class Grid:
                 scan_moves.append((i, dy))
                 scan_moves.append((-i, dy))
 
-        black_color_threshold = 30
-
         for cell_coord, screen_pos in self.cells.items():
-            is_potentially_walkable = False
-            is_hole = False
+            walkable_pixel_count = 0
+            hole_pixel_count = 0
 
+            y_offset_walkable = -15
             for dx, dy in scan_moves:
-                scan_x, scan_y = screen_pos[0] + dx, screen_pos[1] + dy
+                scan_x, scan_y = screen_pos[0] + dx, screen_pos[1] + y_offset_walkable + dy
                 if not (0 <= scan_x < screenshot.width and 0 <= scan_y < screenshot.height):
                     continue
                 try:
-                    pixel_color = screenshot.getpixel((scan_x, scan_y))
-                    
-                    if sum(pixel_color) < black_color_threshold:
-                        is_hole = True
-                    
-                    if sum(pixel_color) >= 50:
-                        for tac_color in self.tactical_colors:
-                            if all(abs(pixel_color[i] - tac_color[i]) <= color_tolerance for i in range(3)):
-                                is_potentially_walkable = True
-                                break
+                    pixel_rgb = screenshot.getpixel((scan_x, scan_y))
+                    for target_color in self.walkable_cell_colors_rgb:
+                        if all(abs(pixel_rgb[i] - target_color[i]) <= 15 for i in range(3)):
+                            walkable_pixel_count += 1
+                            break
+                except IndexError:
+                    pass
+
+            if walkable_pixel_count >= 5:
+                self.walkable_cells.add(cell_coord)
+                self.los_transparent_cells.add(cell_coord)
+                continue
+
+            y_offset_hole = 10
+            for dx, dy in scan_moves:
+                scan_x, scan_y = screen_pos[0] + dx, screen_pos[1] + y_offset_hole + dy
+                if not (0 <= scan_x < screenshot.width and 0 <= scan_y < screenshot.height): continue
+                try:
+                    pixel_rgb = screenshot.getpixel((scan_x, scan_y))
+                    if all(c <= 15 for c in pixel_rgb):
+                        hole_pixel_count += 1
                 except IndexError:
                     pass
             
-            if is_hole:
-                self.los_transparent_cells.add(cell_coord)
-            elif is_potentially_walkable:
-                self.walkable_cells.add(cell_coord) # Une case marchable est forcément transparente
+            if hole_pixel_count >= 5:
                 self.los_transparent_cells.add(cell_coord)
 
         log(f"[Grille] Cartographie terminée : {len(self.walkable_cells)} cases marchables trouvées.")
@@ -284,7 +296,7 @@ class Grid:
             line_cells.append(self._cube_to_axial(self._cube_round(interp_cube)))
             
         for cell in line_cells:
-            if cell != end and cell not in self.los_transparent_cells:
+            if cell != start and cell != end and cell not in self.los_transparent_cells:
                 log(f"[Debug LdV] Ligne de vue de {start} à {end} bloquée par {cell}.")
                 return False
         return True
