@@ -8,12 +8,6 @@
     "FLOTTEUR_CHECK_INTERVAL": 0.1,
     "KEYBINDS": {
         "PAUSE_RESUME": "0+Ctrl droite",
-        "MOVE_UP": "Ctrl droite+Haut",
-        "MOVE_DOWN": "Bas+Ctrl droite",
-        "MOVE_LEFT": "Ctrl droite+Gauche",
-        "MOVE_RIGHT": "Ctrl droite+Droite"
-    },
-    "MAP_CREATION_KEYS": {
         "ADD_SPOT": "5+Ctrl droite",
         "EXIT_UP_LEFT": "7+Ctrl droite",
         "EXIT_UP": "8+Ctrl droite",
@@ -24,6 +18,7 @@
         "EXIT_DOWN": "2+Ctrl droite",
         "EXIT_DOWN_RIGHT": "3+Ctrl droite"
     },
+    "MAP_CREATION_KEYS": {},
     "COMBAT": {
         "ACTION_POINTS": 9,
         "MOVEMENT_POINTS": 5,
@@ -36,7 +31,6 @@
                 "range_min": 1,
                 "range_max": 8,
                 "casts_per_turn": 1,
-                "cooldown": 6,
                 "is_movement": true,
                 "requires_los": false
             },
@@ -73,6 +67,14 @@
                 "is_movement": false,
                 "requires_los": true
             }
+        ],
+        "WALKABLE_COLORS_HEX": [
+            "ABBF69",
+            "B9CE71",
+            "779C49",
+            "6E9143",
+            "B4B770",
+            "A7AA68"
         ]
     },
     "GRID": {
@@ -101,8 +103,8 @@
             715
         ],
         "CREATURE_MODE_POS": [
-            1250,
-            710
+            1259,
+            706
         ],
         "READY_BUTTON_POS": [
             1249,

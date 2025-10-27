@@ -8,6 +8,7 @@ import numpy as np
 import os
 from PIL import ImageGrab, Image
 from utils import log, is_red_present, check_and_close_levelup_popup, is_fight_started, check_for_pause, is_stop_requested
+from grid import grid_instance
 from fight import handle_fight
 
 # --- Configuration Globale ---
@@ -26,16 +27,6 @@ FLOTTEUR_CHECK_INTERVAL = CONFIG["FLOTTEUR_CHECK_INTERVAL"]
 MAP_FOLDER = "Maps"
 IMAGE_FOLDER = "Images"
 PECHER_IMAGE = os.path.join(IMAGE_FOLDER, "button_fish.png")
-
-move_request_direction = None
-
-def set_move_request(direction):
-    global move_request_direction
-    move_request_direction = direction
-
-def get_move_request():
-    global move_request_direction
-    return move_request_direction
 
 # --- Fonctions de Pêche ---
 
@@ -99,32 +90,27 @@ def wait_for_fishing_cycle_color(x, y, min_delay=FISHING_DELAY_MIN, max_delay=FI
 def run_fishing_cycle(map_coords, map_data, gui_app, target_direction):
     # --- Logique principale du cycle de pêche ---
     check_for_pause()
-    global move_request_direction
-    move_request_direction = None
 
     cells = map_data.get("cells", [])
     exits = map_data.get("exits", {})
 
     if target_direction and target_direction in exits:
         log(f"Optimisation du trajet vers la sortie '{target_direction}'.")
-        exit_pos = exits[target_direction]
-        exit_x, exit_y = exit_pos['x'], exit_pos['y']
+        exit_screen_pos = exits[target_direction]
+        exit_grid_cell = grid_instance.get_cell_from_screen_coords(exit_screen_pos['x'], exit_screen_pos['y'])
 
         def distance_to_exit(cell):
-            return math.sqrt((cell['x'] - exit_x)**2 + (cell['y'] - exit_y)**2)
+            cell_grid_pos = grid_instance.get_cell_from_screen_coords(cell['x'], cell['y'])
+            return grid_instance.get_distance(cell_grid_pos, exit_grid_cell) if cell_grid_pos and exit_grid_cell else float('inf')
 
         cells.sort(key=distance_to_exit, reverse=True)
     else:
         log("Aucune sortie planifiée, parcours des points dans l'ordre du fichier.")
 
-    if is_stop_requested() or move_request_direction:
+    if is_stop_requested():
         return False
 
     for cell in cells:
-        if is_stop_requested() or move_request_direction:
-            log("Arrêt d'urgence demandé. Interruption immédiate.")
-            break
-        
         if is_fight_started():
             log("COMBAT DÉTECTÉ (agression) ! Lancement de la gestion du combat.")
             auto_combat_enabled = gui_app.auto_combat_var.get()
@@ -133,7 +119,6 @@ def run_fishing_cycle(map_coords, map_data, gui_app, target_direction):
             return run_fishing_cycle(map_coords, map_data, gui_app, target_direction)
 
         check_for_pause()
-
         x, y = cell["x"], cell["y"]
 
         gui_app.after(0, gui_app.highlight_spot, cell, "orange")
@@ -167,4 +152,4 @@ def run_fishing_cycle(map_coords, map_data, gui_app, target_direction):
             gui_app.after(0, gui_app.highlight_spot, cell, "orange")
         time.sleep(random.uniform(0.05, 0.1))
     
-    return not (is_stop_requested() or move_request_direction)
+    return not is_stop_requested()

@@ -7,9 +7,10 @@ import queue
 import time
 import json
 import keyboard
+import keyboard # Keep this import for hotkeys
 from PIL import Image, ImageTk
-import os
-from main import main_bot_logic, request_map_change, get_map_coordinates, load_map_data, create_map_interactively, find_exit_with_fallback, wait_for_map_change, get_next_map_coords
+import os 
+from main import main_bot_logic, get_map_coordinates, load_map_data, create_map_interactively, find_exit_with_fallback, wait_for_map_change, get_next_map_coords
 from utils import set_pause_state, set_stop_state, is_stop_requested, is_fight_started
 from grid import grid_instance
 from fight import combat_state
@@ -60,13 +61,11 @@ class GuiApp(tk.Tk):
         self.bot_tab = ttk.Frame(self.notebook, style='TFrame')
         self.settings_tab = ttk.Frame(self.notebook, style='TFrame')
         self.combat_tab = ttk.Frame(self.notebook, style='TFrame')
-        self.path_tab = ttk.Frame(self.notebook, style='TFrame')
         self.map_tab = ttk.Frame(self.notebook, style='TFrame')
 
         self.notebook.add(self.bot_tab, text='Bot')
         self.notebook.add(self.map_tab, text='Map')
         self.notebook.add(self.combat_tab, text='Combat')
-        self.notebook.add(self.path_tab, text='Déplacement')
         self.notebook.add(self.settings_tab, text='Configuration')
 
         # --- Onglet: Bot ---
@@ -99,7 +98,7 @@ class GuiApp(tk.Tk):
 
         # --- Widgets de l'onglet Configuration ---
         self.key_vars = {}
-        keybind_definitions = [
+        hotkey_definitions = [
             ("PAUSE_RESUME", "Touche Pause/Reprise"),
             ("ADD_SPOT", "Ajouter Spot Pêche"),
             ("EXIT_UP_LEFT", "Sortie Haut-Gauche"),
@@ -108,12 +107,10 @@ class GuiApp(tk.Tk):
             ("EXIT_LEFT", "Sortie Gauche"),
             ("EXIT_RIGHT", "Sortie Droite"),
             ("EXIT_DOWN_LEFT", "Sortie Bas-Gauche"),
-            ("EXIT_DOWN", "Sortie Bas"),
-            ("EXIT_DOWN_RIGHT", "Sortie Bas-Droite"),
-            ("MOVE_UP", "Déplacement Haut"),
-            ("MOVE_DOWN", "Déplacement Bas"),
-            ("MOVE_LEFT", "Déplacement Gauche"),
-            ("MOVE_RIGHT", "Déplacement Droite"),
+            ("EXIT_DOWN", "Sortie Bas"), 
+            ("EXIT_DOWN_RIGHT", "Sortie Bas-Droite"), 
+        ]
+        position_definitions = [
             ("TACTICAL_MODE_POS", "Pos. Mode Tactique"),
             ("LOCK_MODE_POS", "Pos. Verrouillage Combat"),
             ("CREATURE_MODE_POS", "Pos. Mode Créature"),
@@ -140,17 +137,28 @@ class GuiApp(tk.Tk):
         # --- Section Hotkeys ---
         ttk.Label(scrollable_frame, text="--- Hotkeys ---", font=('calibri', 10, 'bold')).pack(fill='x', padx=5, pady=(10,2))
 
-        for key_id, label_text in keybind_definitions:
+        for key_id, label_text in hotkey_definitions:
             frame = ttk.Frame(scrollable_frame)
             frame.pack(fill='x', padx=5, pady=2)
             ttk.Label(frame, text=f"{label_text}:", width=25).pack(side=tk.LEFT)
             var = tk.StringVar()
             ttk.Entry(frame, textvariable=var, state='readonly', width=15).pack(side=tk.LEFT, padx=5)
             
-            is_pos_capture = "POS" in key_id
-            capture_text = "Capturer Pos" if is_pos_capture else "Capturer Touche"
-            capture_func = self.capture_position if is_pos_capture else self.capture_key
+            capture_text = "Capturer Touche"
+            capture_func = self.capture_key
             capture_button = ttk.Button(frame, text=capture_text, command=lambda v=var, b=None, f=capture_func: f(v, b))
+            capture_button.pack(side=tk.LEFT, padx=5)
+            self.key_vars[key_id] = (var, capture_button)
+
+        # --- Section Positions ---
+        ttk.Label(scrollable_frame, text="--- Positions ---", font=('calibri', 10, 'bold')).pack(fill='x', padx=5, pady=(10,2))
+        for key_id, label_text in position_definitions:
+            frame = ttk.Frame(scrollable_frame)
+            frame.pack(fill='x', padx=5, pady=2)
+            ttk.Label(frame, text=f"{label_text}:", width=25).pack(side=tk.LEFT)
+            var = tk.StringVar()
+            ttk.Entry(frame, textvariable=var, state='readonly', width=15).pack(side=tk.LEFT, padx=5)
+            capture_button = ttk.Button(frame, text="Capturer Pos", command=lambda v=var, b=None: self.capture_position(v, b))
             capture_button.pack(side=tk.LEFT, padx=5)
             self.key_vars[key_id] = (var, capture_button)
 
@@ -166,6 +174,15 @@ class GuiApp(tk.Tk):
             self.key_vars[key_id] = (var, None)
 
         # --- Section Divers ---
+        ttk.Label(scrollable_frame, text="--- Combat ---", font=('calibri', 10, 'bold')).pack(fill='x', padx=5, pady=(10,2))
+        frame = ttk.Frame(scrollable_frame)
+        frame.pack(fill='x', padx=5, pady=2)
+        ttk.Label(frame, text="Couleurs Marchables (Hex):", width=25).pack(side=tk.LEFT)
+        var = tk.StringVar()
+        entry = ttk.Entry(frame, textvariable=var, width=30)
+        entry.pack(side=tk.LEFT, padx=5, fill='x', expand=True)
+        self.key_vars["WALKABLE_COLORS_HEX"] = (var, None)
+
         ttk.Label(scrollable_frame, text="--- Divers ---", font=('calibri', 10, 'bold')).pack(fill='x', padx=5, pady=(10,2))
         self.debug_click_var = tk.BooleanVar()
         self.debug_click_check = ttk.Checkbutton(scrollable_frame, text="Debug Clic sur la carte", variable=self.debug_click_var)
@@ -181,28 +198,6 @@ class GuiApp(tk.Tk):
         
         self.save_settings_button = ttk.Button(config_control_frame, text="Sauvegarder", command=self.save_settings)
         self.save_settings_button.pack(side=tk.TOP, pady=2, fill=tk.X)
-
-        # --- Widgets de l'onglet Déplacement ---
-        self.path_log_widget = scrolledtext.ScrolledText(self.path_tab, state='disabled', bg=light_grey_bg, fg=text_color, font=("Consolas", 9), relief='flat', height=12)
-        self.path_log_widget.pack(pady=(5,0), padx=5, fill='x', expand=False)
-
-        path_buttons_frame = ttk.Frame(self.path_tab)
-        buttons = {
-            'haut-gauche': (0, 0), 'haut': (0, 1), 'haut-droite': (0, 2),
-            'gauche': (1, 0), 'droite': (1, 2),
-            'bas-gauche': (2, 0), 'bas': (2, 1), 'bas-droite': (2, 2)
-        }
-        arrow_symbols = {
-            'haut-gauche': '↖', 'haut': '↑', 'haut-droite': '↗',
-            'gauche': '←', 'droite': '→',
-            'bas-gauche': '↙', 'bas': '↓', 'bas-droite': '↘'
-        }
-
-        for direction, pos in buttons.items():
-            btn = ttk.Button(path_buttons_frame, text=arrow_symbols[direction], width=4,
-                             command=lambda d=direction: self.trigger_map_change(d))
-            btn.grid(row=pos[0], column=pos[1], padx=5, pady=2)
-        path_buttons_frame.pack(side=tk.BOTTOM, pady=(4, 10))
 
         # --- Onglet: Map ---
         self.map_canvas = tk.Canvas(self.map_tab, bg=light_grey_bg, highlightthickness=0)
@@ -303,12 +298,6 @@ class GuiApp(tk.Tk):
             self.log_widget.config(state='disabled')
             self.log_widget.see(tk.END)
 
-            if msg.startswith("[Trajet]"):
-                self.path_log_widget.config(state='normal')
-                self.path_log_widget.insert(tk.END, msg + '\n')
-                self.path_log_widget.config(state='disabled')
-                self.path_log_widget.see(tk.END)
-
         self.after(100, self.process_log_queue)
 
     def start_bot(self):
@@ -335,14 +324,13 @@ class GuiApp(tk.Tk):
     def toggle_pause_bot(self):
         self.is_paused = not self.is_paused
         set_pause_state(self.is_paused)
+        self.after(100, self.release_modifier_keys_after_hotkey)
         if self.is_paused:
             self.pause_button.config(text="Reprendre")
             self.update_status_labels("Statut : En pause")
             self.log_to_widget("[GUI] Script mis en pause.")
         else:
             self.pause_button.config(text="Pause")
-            self.update_status_labels("Statut : En cours...")
-            self.after(100, self.release_modifier_keys_after_hotkey)
             self.log_to_widget("[GUI] Reprise du script.")
 
     def reload_bot(self):
@@ -351,47 +339,6 @@ class GuiApp(tk.Tk):
             self.reloading = True
             self.stop_bot(close_app=False)
 
-    def trigger_map_change(self, direction):
-        if self.bot_thread and self.bot_thread.is_alive():
-            self.log_to_widget(f"[Trajet] Déplacement demandé vers : {direction.capitalize()}")
-            request_map_change(direction)
-        else:
-            self.log_to_widget("[Trajet] Déplacement manuel initié (bot à l'arrêt).")
-            threading.Thread(target=self.manual_move, args=(direction,), daemon=True).start()
-
-    def manual_move(self, direction):
-        coords = get_map_coordinates()
-        if not coords:
-            self.log_to_widget("[Trajet] Impossible de lire les coordonnées de la carte actuelle.")
-            return
-
-        self.log_to_widget(f"[Trajet] Position actuelle : {coords}.")
-        try:
-            map_data = load_map_data(coords)
-            target_direction = find_exit_with_fallback(map_data, direction)
-            
-            if target_direction:
-                next_coords = get_next_map_coords(coords, target_direction)
-                if os.path.exists(os.path.join("Maps", f"{next_coords}.json")):
-                    self.log_to_widget(f"[Trajet] Déplacement vers '{target_direction}' (carte {next_coords} connue).")
-                    self.perform_move(coords, map_data, target_direction)
-                else:
-                    self.log_to_widget(f"[Trajet] La carte de destination {next_coords} n'est pas dans la base de données. Déplacement annulé.")
-            else:
-                self.log_to_widget(f"[Trajet] Aucune sortie directe '{direction}'. Recherche d'une alternative...")
-        except FileNotFoundError:
-            self.log_to_widget(f"[Trajet] Fichier de map introuvable pour {coords}.")
-        except Exception as e:
-            self.log_to_widget(f"[Trajet] Erreur lors du déplacement manuel : {e}")
-
-    def perform_move(self, current_coords, map_data, direction):
-        exit_pos = map_data["exits"][direction]
-        pyautogui.click(exit_pos["x"], exit_pos["y"])
-        self.log_to_widget(f"[Trajet] Clic sur la sortie '{direction}'. Attente du changement de map...")
-           
-        if wait_for_map_change(current_coords):
-            self.after(500, self.draw_map) 
-            
     def stop_bot(self, close_app=False):
         def release_modifier_keys():
             keyboard.release('ctrl')
@@ -783,6 +730,7 @@ class GuiApp(tk.Tk):
         map_keys_config = config.get("MAP_CREATION_KEYS", {})
         pos_config = config.get("POSITIONS", {})
         grid_config = config.get("GRID", {})
+        combat_config = config.get("COMBAT", {})
 
         for key_id, (var, _) in self.key_vars.items():
             if "POS" in key_id:
@@ -791,10 +739,12 @@ class GuiApp(tk.Tk):
             elif key_id == "origin":
                 pos_value = grid_config.get(key_id, [])
                 var.set(','.join(map(str, pos_value)) if pos_value else '')
+            elif key_id == "WALKABLE_COLORS_HEX":
+                hex_colors = combat_config.get("WALKABLE_COLORS_HEX", [])
+                var.set(', '.join(hex_colors))
             else:
                 var.set(keybinds_config.get(key_id) or map_keys_config.get(key_id, ''))
 
-        combat_config = config.get("COMBAT", {})
         self.pa_var.set(combat_config.get("ACTION_POINTS", 6))
         self.pm_var.set(combat_config.get("MOVEMENT_POINTS", 3))
         
@@ -825,6 +775,7 @@ class GuiApp(tk.Tk):
             map_keys_config = {}
             pos_config = {}
             grid_config = config.get("GRID", {})
+            combat_config = config.get("COMBAT", {})
 
             for key_id, (var, _) in self.key_vars.items():
                 value = var.get()
@@ -838,12 +789,16 @@ class GuiApp(tk.Tk):
                         grid_config[key_id] = float(value)
                     except ValueError:
                         pass
-                elif key_id in ["PAUSE_RESUME", "MOVE_UP", "MOVE_DOWN", "MOVE_LEFT", "MOVE_RIGHT"]:
-                    keybinds_config[key_id] = self._format_hotkey_for_save(value)
+                elif key_id == "WALKABLE_COLORS_HEX":
+                    hex_colors = [c.strip().upper().replace('#', '') for c in value.split(',') if c.strip()]
+                    combat_config["WALKABLE_COLORS_HEX"] = hex_colors
+                elif key_id in self.key_vars and self.key_vars[key_id][1] and "Pos" not in self.key_vars[key_id][1].cget("text"):
+                    keybinds_config[key_id] = self._format_hotkey_for_save(value) 
                 else:
                     map_keys_config[key_id] = self._format_hotkey_for_save(value)
             config["KEYBINDS"] = keybinds_config
             grid_config["origin"] = pos_config.pop("origin", grid_config.get("origin"))
+            config["COMBAT"] = combat_config
 
             config["MAP_CREATION_KEYS"] = map_keys_config
 
@@ -851,7 +806,6 @@ class GuiApp(tk.Tk):
             config["POSITIONS"] = pos_config
             config["GRID"] = grid_config
 
-            combat_config = config.get("COMBAT", {})
             try:
                 combat_config["ACTION_POINTS"] = int(self.pa_var.get())
                 combat_config["MOVEMENT_POINTS"] = int(self.pm_var.get())

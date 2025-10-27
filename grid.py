@@ -19,10 +19,7 @@ class Grid:
         self.cell_height = 49.5
         self.walkable_cells = set()
         self.los_transparent_cells = set()
-        self.walkable_cell_colors_rgb = [
-            (171, 191, 105),  # ABBF69
-            (185, 206, 113),  # B9CE71
-        ]
+        self.walkable_cell_colors_rgb = []
         self.load_config()
 
     def load_config(self):
@@ -35,8 +32,17 @@ class Grid:
                     config = json.load(f)
                 
                 grid_config = config.get('GRID')
+                combat_config = config.get('COMBAT', {})
+
+                hex_colors = combat_config.get("WALKABLE_COLORS_HEX", [])
+                self.walkable_cell_colors_rgb = []
+                for hex_color in hex_colors:
+                    hex_color = hex_color.lstrip('#')
+                    self.walkable_cell_colors_rgb.append(tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4)))
+
                 if grid_config and 'origin' in grid_config:
                     self._apply_config(grid_config)
+                    log(f"[Grille] {len(self.walkable_cell_colors_rgb)} couleurs de cases marchables chargées.")
                     log("[Grille] Configuration de la grille chargée depuis config.json.")
                     return
             except Exception as e:
