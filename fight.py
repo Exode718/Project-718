@@ -28,16 +28,16 @@ SPELLS.sort(key=lambda x: x.get('priority', 99))
 IMAGE_FOLDER = "Images"
 END_TURN_BUTTON_IMAGE = os.path.join(IMAGE_FOLDER, "button_end_turn.png")
 MY_TURN_INDICATOR_IMAGE = os.path.join(IMAGE_FOLDER, "my_turn_indicator.png")
-PLAYER_START_CELL_COLOR = ([0, 150, 150], [10, 255, 255])      # Rouge (cases de départ du joueur)
-MONSTER_START_CELL_COLOR = ([90, 100, 100], [125, 255, 255])   # Bleu (cases de départ des monstres)
-PLAYER_FEET_CIRCLE_COLOR_NORMAL = ([25, 100, 100], [35, 255, 255]) # Jaune/Or normal (C7A556)
-PLAYER_FEET_CIRCLE_COLOR_HOVER = ([25, 50, 150], [35, 180, 255])   # Jaune/Or survol (DCC899)
-MONSTER_FEET_CIRCLE_COLOR_NORMAL = ([10, 180, 100], [25, 255, 200]) # Orange/Marron normal
-MONSTER_FEET_CIRCLE_COLOR_HOVER = ([20, 100, 150], [30, 255, 255])  # Orange/Marron survol (D9B474)
+PLAYER_START_CELL_COLOR_RGB = (255, 0, 0)  # Rouge
+MONSTER_START_CELL_COLOR_RGB = (0, 0, 255) # Bleu
 ALLY_IMAGES = [os.path.join(IMAGE_FOLDER, f"ally{i}.png") for i in range(1, 5)]
 ENEMY_IMAGES = [os.path.join(IMAGE_FOLDER, f"enemy{i}.png") for i in range(1, 5)]
+SHADOW_RGB_COLOR = (56, 44, 22) # RGB for #382C16
 ALLY_TEMPLATES = [cv2.imread(p, 0) for p in ALLY_IMAGES if os.path.exists(p)]
 ENEMY_TEMPLATES = [cv2.imread(p, 0) for p in ENEMY_IMAGES if os.path.exists(p)]
+
+SPELL_COOLDOWNS = {}
+CURRENT_TURN = 0
 
 combat_modes_checked = False
 
@@ -83,89 +83,96 @@ def is_my_turn(timeout=2):
         time.sleep(0.2)
     return False
 
-def ensure_mode_is_on(off_image, on_image, mode_name):
-    if find_on_screen(off_image, threshold=0.9):
-        log(f"[Combat Auto] {mode_name} est désactivé. Tentative d'activation...")
+def wait_for_next_turn(timeout=30):
+    log("[Combat Auto] Attente de la fin de notre tour...")
+    start_time = time.time()
+    while is_my_turn(timeout=0.5) and time.time() - start_time < timeout:
+        time.sleep(0.5)
+    
+    log("[Combat Auto] Attente du début du prochain tour...")
+    while not is_my_turn(timeout=0.5) and time.time() - start_time < timeout:
+        time.sleep(0.5)
+    return False
+
+def ensure_mode_is_on(off_image, on_image, mode_name, retries=3, delay=0.5):
+    if find_on_screen(on_image, threshold=0.9):
+        log(f"[Combat Auto] {mode_name} est déjà activé.")
+        return True
+
+    for i in range(retries):
         off_button_pos = find_on_screen(off_image, threshold=0.9)
         if off_button_pos:
+            log(f"[Combat Auto] {mode_name} est désactivé. Tentative d'activation ({i+1}/{retries})...")
             pyautogui.click(off_button_pos[0], off_button_pos[1])
-            time.sleep(0.5)
+            time.sleep(delay)
             if find_on_screen(on_image, threshold=0.9):
                 log(f"[Combat Auto] {mode_name} activé avec succès.")
                 return True
-            else:
-                log(f"[Combat Auto] Échec de l'activation de {mode_name}.")
-                return False
-    elif find_on_screen(on_image, threshold=0.9):
-        log(f"[Combat Auto] {mode_name} est déjà activé.")
-        return True
+        else:
+            log(f"[Combat Auto] Impossible de trouver le bouton '{mode_name}' (off). Vérification s'il est déjà activé.")
+            if find_on_screen(on_image, threshold=0.9):
+                log(f"[Combat Auto] {mode_name} est bien activé.")
+                return True
+
+    log(f"[Combat Auto] ÉCHEC CRITIQUE de l'activation de {mode_name} après {retries} tentatives.")
     return False
 
-def find_entities_by_color(color_range_list, min_area=100, bbox=None):
+def find_cells_by_color(target_color_rgb, tolerance=50, min_area=200, bbox=None):
     screen_pil = ImageGrab.grab(bbox=bbox)
     screen_np = np.array(screen_pil)
-    screen_hsv = cv2.cvtColor(screen_np, cv2.COLOR_RGB2HSV)
+    
+    lower_bound = np.array([max(0, c - tolerance) for c in target_color_rgb])
+    upper_bound = np.array([min(255, c + tolerance) for c in target_color_rgb])
+    
+    screen_bgr = cv2.cvtColor(screen_np, cv2.COLOR_RGB2BGR)
+    
+    mask = cv2.inRange(screen_bgr, lower_bound[::-1], upper_bound[::-1])
+    contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
     positions = []
-    for color_range in color_range_list:
-        mask = cv2.inRange(screen_hsv, np.array(color_range[0]), np.array(color_range[1]))
-        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
-        for c in contours:
-            if cv2.contourArea(c) > min_area:
-                M = cv2.moments(c)
-                if M["m00"] > 0:
-                    cx = int(M["m10"] / M["m00"])
-                    cy = int(M["m01"] / M["m00"])
-
-                    if bbox:
-                        positions.append((cx + bbox[0], cy + bbox[1]))
-                    else:
-                        positions.append((cx, cy))
-    return positions
-
-def find_entities_on_grid(color_ranges, min_area=100, bbox=None, exclude_rect=None):
-    if min_area < 100:
-        screenshot = ImageGrab.grab(bbox=bbox)
-        hsv_screenshot = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2HSV)
-        grid_positions = []
-        offset_x, offset_y = (bbox[0], bbox[1]) if bbox else (0, 0)
-        scan_radius = 10
-
-        for cell_coord, screen_pos in grid_instance.cells.items():
-            if exclude_rect and (exclude_rect[0] - offset_x <= screen_pos[0] - offset_x <= exclude_rect[2] - offset_x and \
-                                 exclude_rect[1] - offset_y <= screen_pos[1] - offset_y <= exclude_rect[3] - offset_y):
-                continue
-
-            x_center, y_center = screen_pos[0] - offset_x, screen_pos[1] - offset_y
-            
-            x_start, y_start = x_center - scan_radius, y_center - scan_radius
-            x_end, y_end = x_center + scan_radius, y_center + scan_radius
-
-            if not (0 <= x_start < screenshot.width and 0 <= y_start < screenshot.height and x_end <= screenshot.width and y_end <= screenshot.height):
-                continue
-
-            roi = hsv_screenshot[y_start:y_end, x_start:x_end]
-            
-            mask_circle = np.zeros(roi.shape[:2], dtype="uint8")
-            cv2.circle(mask_circle, (scan_radius, scan_radius), scan_radius, 255, -1)
-
-            for color_range in color_ranges:
-                color_mask = cv2.inRange(roi, np.array(color_range[0]), np.array(color_range[1]))
-                masked_color = cv2.bitwise_and(color_mask, color_mask, mask=mask_circle)
-                if np.count_nonzero(masked_color) >= 30:
-                        grid_positions.append(cell_coord)
-                        break
-        return list(set(grid_positions))
-
-    screen_positions = find_entities_by_color(color_ranges, min_area, bbox=bbox)
+    for c in contours:
+        if cv2.contourArea(c) > min_area:
+            M = cv2.moments(c)
+            if M["m00"] > 0:
+                cx = int(M["m10"] / M["m00"]) + (bbox[0] if bbox else 0)
+                cy = int(M["m01"] / M["m00"]) + (bbox[1] if bbox else 0)
+                positions.append((cx, cy))
+    screen_positions = positions
     grid_positions = [grid_instance.get_cell_from_screen_coords(pos[0], pos[1]) for pos in screen_positions]
     return list(set(filter(None, grid_positions)))
 
-def find_entities_by_image(templates, screenshot_gray, threshold=0.8, y_compensation_factor=1.5):
+def is_shadow_present_on_cell(screenshot_pil, grid_cell, color_rgb, tolerance=20, radius=10, min_pixels=5):
+    screen_pos = grid_instance.cells.get(grid_cell)
+    if not screen_pos:
+        return False
+
+    game_area_x_offset, game_area_y_offset = 0, 24
+    x_center_rel = screen_pos[0] - game_area_x_offset
+    y_center_rel = screen_pos[1] - game_area_y_offset
+
+    pixel_count = 0
+    for x_offset in range(-radius, radius + 1):
+        for y_offset in range(-radius, radius + 1):
+            if x_offset**2 + y_offset**2 <= radius**2:
+                try:
+                    pixel = screenshot_pil.getpixel((x_center_rel + x_offset, y_center_rel + y_offset))
+                    if all(abs(pixel[i] - color_rgb[i]) <= tolerance for i in range(3)):
+                        pixel_count += 1
+                except IndexError:
+                    continue
+    return pixel_count >= min_pixels
+
+def find_entities_by_image(templates, screenshot_pil, threshold=0.8, y_compensation_factor=1.5, exclude_rect=None):
     if not templates:
         return []
 
+    screenshot_np = np.array(screenshot_pil)
+    if exclude_rect:
+        x1, y1, x2, y2 = exclude_rect
+        screenshot_np[y1:y2, x1:x2] = 0
+    screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_BGR2GRAY)
     found_centers = []
+    scores = {}
     for template in templates:
         if template is None: continue
         h, w = template.shape
@@ -174,28 +181,28 @@ def find_entities_by_image(templates, screenshot_gray, threshold=0.8, y_compensa
 
         for pt in zip(*loc[::-1]):
             center_x, center_y = pt[0] + w // 2, pt[1] + h // 2
-            is_duplicate = False
-            for (fx, fy) in found_centers:
-                if abs(center_x - fx) < 30 and abs(center_y - fy) < 30:
-                    is_duplicate = True
-                    break
+            is_duplicate = any(abs(center_x - fx) < 30 and abs(center_y - fy) < 30 for fx, fy in found_centers)
             if not is_duplicate:
                 found_centers.append((center_x, center_y))
+                scores[(center_x, center_y)] = res[pt[1], pt[0]]
 
     grid_positions = set()
     for center_x, center_y in found_centers:
         anchor_x, anchor_y = center_x, center_y + int(30 * (y_compensation_factor - 1.0))
         grid_cell = grid_instance.get_cell_from_screen_coords(anchor_x, anchor_y)
         if grid_cell:
-            grid_positions.add(grid_cell)
+            if is_shadow_present_on_cell(screenshot_pil, grid_cell, SHADOW_RGB_COLOR):
+                grid_positions.add((grid_cell, scores.get((center_x, center_y), 0)))
+            else:
+                log(f"[Debug Entité] Faux positif à {grid_cell}? Ombre non détectée (Score image: {scores.get((center_x, center_y), 0):.2f}).")
     return list(grid_positions)
 
 def get_start_cells_from_grid(screenshot):
     global possible_player_starts, possible_monster_starts
     game_area = (0, 24, 1348, 808)
     
-    possible_player_starts = find_entities_on_grid([PLAYER_START_CELL_COLOR], min_area=200, bbox=game_area)
-    possible_monster_starts = find_entities_on_grid([MONSTER_START_CELL_COLOR], min_area=200, bbox=game_area)
+    possible_player_starts = find_cells_by_color(PLAYER_START_CELL_COLOR_RGB, tolerance=50, min_area=200, bbox=game_area)
+    possible_monster_starts = find_cells_by_color(MONSTER_START_CELL_COLOR_RGB, tolerance=50, min_area=200, bbox=game_area)
     
     combat_state.possible_player_starts = possible_player_starts
     combat_state.possible_monster_starts = possible_monster_starts
@@ -209,107 +216,161 @@ def get_closest_entity(player_pos, entity_list):
     
     return min(entity_list, key=lambda entity: grid_instance.get_distance(player_pos, entity))
 
-def is_placement_cell_occupied(cell_coord, cell_color_range):
+def is_placement_cell_occupied(cell_coord, cell_color_rgb):
     try:
         screen_pos = grid_instance.cells.get(cell_coord)
         if not screen_pos: return True
 
-        pixel_rgb = pyautogui.pixel(screen_pos[0], screen_pos[1] - 10)
-        pixel_hsv = cv2.cvtColor(np.uint8([[pixel_rgb]]), cv2.COLOR_RGB2HSV)[0][0]
-
-        is_center_colored = cell_color_range[0][0] <= pixel_hsv[0] <= cell_color_range[1][0] and cell_color_range[0][1] <= pixel_hsv[1] <= cell_color_range[1][1]
-
-        if cell_color_range == MONSTER_START_CELL_COLOR:
-            return not is_center_colored
-        elif cell_color_range == PLAYER_START_CELL_COLOR:
-            return not is_center_colored
-        return False
+        pixel_at_center = pyautogui.pixel(screen_pos[0], screen_pos[1] - 10)
+        is_occupied = all(abs(pixel_at_center[i] - cell_color_rgb[i]) > 50 for i in range(3))
+        return is_occupied
     except Exception as e:
         log(f"[Combat Auto] Erreur lors de la vérification de l'occupation de la case {cell_coord}: {e}")
         return True
+ 
+def verify_and_update_position(old_pos, destination_cell, game_area, gui_app):
+    log("[Combat Auto] Vérification de la position après mouvement...")
+    pyautogui.moveTo(100, 100, duration=0.1)
+    
+    for attempt in range(3):
+        time.sleep(0.7)
+        screenshot_after_move = ImageGrab.grab(bbox=game_area)
+        
+        if is_shadow_present_on_cell(screenshot_after_move, destination_cell, SHADOW_RGB_COLOR):
+            log(f"[Combat Auto] Déplacement réussi vers {destination_cell}.")
+            combat_state.player_positions = [destination_cell]
+            if gui_app: gui_app.after(0, gui_app.draw_map, True)
+            return destination_cell, True
 
+        new_pos_list = [p for p, s in find_entities_by_image(ALLY_TEMPLATES, screenshot_after_move, y_compensation_factor=1.8)]
+        if new_pos_list and new_pos_list[0] != old_pos:
+            log(f"[Combat Auto] Déplacement réussi vers {new_pos_list[0]} (détection globale).")
+            combat_state.player_positions = [new_pos_list[0]]
+            if gui_app: gui_app.after(0, gui_app.draw_map, True)
+            return new_pos_list[0], True
+
+    log("[Combat Auto] Le déplacement a échoué (personnage bloqué ou clic invalide).")
+    combat_state.player_positions = [old_pos]
+    return old_pos, False
+
+def update_targets_after_action(game_area):
+    log("[Combat Auto] Ré-évaluation des cibles...")
+    pyautogui.moveTo(100, 100, duration=0.1)
+    screenshot = ImageGrab.grab(bbox=game_area)    
+    monster_positions_with_scores = find_entities_by_image(ENEMY_TEMPLATES, screenshot, y_compensation_factor=1.5, exclude_rect=(1190, 671, 1275, 701))
+    combat_state.monster_positions = [p for p, s in monster_positions_with_scores]
+    log(f"[Combat Auto] {len(combat_state.monster_positions)} cibles restantes.")
 class CombatState:
     def __init__(self):
         self.possible_player_starts = []
         self.possible_monster_starts = []
         self.monster_positions = []
         self.player_positions = []
+        self.initial_placement_pos = None
 
     def reset(self):
         self.possible_player_starts = []
         self.possible_monster_starts = []
         self.monster_positions = []
+        self.initial_placement_pos = None
 
 combat_state = CombatState()
 
 # --- Gestion du combat ---
 def handle_fight_auto(gui_app=None):
-    global combat_modes_checked
+    global combat_modes_checked, CURRENT_TURN, SPELL_COOLDOWNS
 
     combat_state.reset()
     if gui_app: gui_app.in_placement_phase = True
+    CURRENT_TURN = 0
+    SPELL_COOLDOWNS.clear()
+
+    winsound.Beep(440, 500)
     log("[Combat Auto] Lancement de la gestion de combat.")
 
     # --- Phase de placement ---
+    if find_on_screen(END_TURN_BUTTON_IMAGE, threshold=0.85, bbox=(1150, 750, 1300, 800)):
+        log("[Combat Auto] Combat déjà en cours détecté. Passage de la phase de placement.")
+        if gui_app: 
+            gui_app.in_placement_phase = False
+    else:
+        log("[Combat Auto] Phase de placement...")
     pyautogui.moveTo(100, 100)
 
     if not grid_instance.is_calibrated:
         log("[Combat Auto] Erreur : La grille de combat n'est pas étalonnée. Passage en mode manuel.")
         handle_fight(auto_combat_enabled=False)
         return
-
-    log("[Combat Auto] Phase de placement...")
-    time.sleep(1)
-
-    if not combat_modes_checked:
-        log("[Combat Auto] Vérification des modes de combat (première fois).")
-        ensure_mode_is_on("Images/tactical_mode_off.png", "Images/tactical_mode_on.png", "Mode Tactique")
-        ensure_mode_is_on("Images/lock_mode_off.png", "Images/lock_mode_on.png", "Verrouillage du combat")
-
-    game_area = (0, 24, 1348, 808) 
-    screenshot = ImageGrab.grab(bbox=game_area)
-    player_starts, monster_starts = get_start_cells_from_grid(screenshot)
-    log(f"[Combat Auto] {len(player_starts)} cases de départ alliées trouvées : {player_starts}")
-    log(f"[Combat Auto] {len(monster_starts)} cases de départ ennemies trouvées : {monster_starts}")
-
-    combat_state.monster_positions = [
-        cell for cell in monster_starts 
-        if is_placement_cell_occupied(cell, MONSTER_START_CELL_COLOR)
-    ]
-    log(f"[Combat Auto] {len(combat_state.monster_positions)} monstres détectés sur les cases de départ : {combat_state.monster_positions}")
-
-    if gui_app:
-        gui_app.after(0, gui_app.draw_map, True)
-
-    if player_starts and combat_state.monster_positions:
-        current_player_pos_list = find_entities_on_grid([PLAYER_FEET_CIRCLE_COLOR_NORMAL, PLAYER_FEET_CIRCLE_COLOR_HOVER], min_area=50, bbox=game_area)
-        current_player_pos = current_player_pos_list[0] if current_player_pos_list else None
-
-        best_cell = None
-        min_dist_to_closest_monster = float('inf')
-
-        for start_cell in [p for p in player_starts if not is_placement_cell_occupied(p, PLAYER_START_CELL_COLOR)]:
-            dist_to_closest = min(grid_instance.get_distance(start_cell, monster_pos) for monster_pos in combat_state.monster_positions)
-            if dist_to_closest < min_dist_to_closest_monster:
-                min_dist_to_closest_monster = dist_to_closest
-                best_cell = start_cell
-        best_start_cell = best_cell
-        
-        if best_start_cell and best_start_cell != current_player_pos and best_start_cell in grid_instance.cells:
-            screen_pos = grid_instance.cells[best_start_cell]
-            log(f"[Combat Auto] Meilleure case de départ : {best_start_cell}. Clic sur {screen_pos}.")
-            pyautogui.click(screen_pos)
-            time.sleep(0.5)
-
-    ready_button_info = find_on_screen("Images/button_ready.png")
-    if ready_button_info:
-        log("[Combat Auto] Clic sur 'Prêt'.")
-        click_random_in_rect(*ready_button_info)
-        pyautogui.moveTo(100, 100, duration=0.1)
     else:
-        log("[Combat Auto] Bouton 'Prêt' non trouvé, appui sur F1 en fallback.")
-        time.sleep(2)
-        pyautogui.press('f1')
+        time.sleep(1)
+
+        if not combat_modes_checked:
+            log("[Combat Auto] Vérification des modes de combat (première fois).")
+            ensure_mode_is_on("Images/tactical_mode_off.png", "Images/tactical_mode_on.png", "Mode Tactique")
+            ensure_mode_is_on("Images/lock_mode_off.png", "Images/lock_mode_on.png", "Verrouillage du combat")
+
+        game_area = (0, 24, 1348, 808) 
+        screenshot = ImageGrab.grab(bbox=game_area)
+        player_starts, monster_starts = get_start_cells_from_grid(screenshot)
+        log(f"[Combat Auto] {len(player_starts)} cases de départ alliées trouvées : {player_starts}")
+        log(f"[Combat Auto] {len(monster_starts)} cases de départ ennemies trouvées : {monster_starts}")
+
+        # Détection des monstres en placement via la couleur de l'ombre sur les cases de départ
+        detected_monsters = []
+        for cell in monster_starts:
+            screen_pos = grid_instance.cells.get(cell)
+            if screen_pos:
+                pixel_rgb = screenshot.getpixel((screen_pos[0] - game_area[0], screen_pos[1] - game_area[1]))
+                if all(abs(pixel_rgb[i] - SHADOW_RGB_COLOR[i]) <= 20 for i in range(3)):
+                    detected_monsters.append(cell)
+        combat_state.monster_positions = detected_monsters
+        log(f"[Combat Auto] {len(combat_state.monster_positions)} monstres détectés sur les cases de départ : {combat_state.monster_positions}")
+
+        # Fallback si aucun monstre avec ombre n'est trouvé
+        if not combat_state.monster_positions and monster_starts:
+            log("[Combat Auto] Aucun monstre avec ombre détecté. Utilisation de toutes les cases de départ ennemies comme cibles potentielles.")
+            combat_state.monster_positions = monster_starts
+
+        if gui_app:
+            gui_app.after(0, gui_app.draw_map, True)
+
+        if player_starts:
+            current_player_pos_list = [p for p,s in find_entities_by_image(ALLY_TEMPLATES, screenshot, y_compensation_factor=1.8)]
+            current_player_pos = current_player_pos_list[0] if current_player_pos_list else None # On prend la première entité alliée trouvée
+
+            best_cell = None
+            min_dist_to_closest_monster = float('inf')
+
+            for start_cell in [p for p in player_starts if not is_placement_cell_occupied(p, PLAYER_START_CELL_COLOR_RGB)]:
+                if not combat_state.monster_positions:
+                    best_cell = start_cell
+                    break
+                dist_to_closest = min(grid_instance.get_distance(start_cell, monster_pos) for monster_pos in combat_state.monster_positions)
+                if dist_to_closest < min_dist_to_closest_monster:
+                    min_dist_to_closest_monster = dist_to_closest
+                    best_cell = start_cell
+
+            if not best_cell and player_starts:
+                best_cell = player_starts[0]
+
+            best_start_cell = best_cell
+            combat_state.initial_placement_pos = best_start_cell
+            
+            if best_start_cell and best_start_cell != current_player_pos and best_start_cell in grid_instance.cells:
+                screen_pos = grid_instance.cells[best_start_cell]
+                log(f"[Combat Auto] Meilleure case de départ : {best_start_cell}. Clic sur {screen_pos}.")
+                pyautogui.click(screen_pos)
+                time.sleep(0.5)
+
+        ready_button_info = find_on_screen("Images/button_ready.png")
+        if ready_button_info:
+            log("[Combat Auto] Clic sur 'Prêt'.")
+            click_random_in_rect(*ready_button_info)
+            pyautogui.moveTo(100, 100, duration=0.1)
+        else:
+            log("[Combat Auto] Bouton 'Prêt' non trouvé, appui sur F1 en fallback.")
+            time.sleep(2)
+            pyautogui.press('f1')
 
     log("[Combat Auto] Attente du début du combat...")
     if gui_app: 
@@ -331,8 +392,9 @@ def handle_fight_auto(gui_app=None):
             time.sleep(0.5)
             continue
 
+        CURRENT_TURN += 1
         log("[Combat Auto] C'est notre tour !")
-        log(f"[Combat Auto] Début du tour avec {ACTION_POINTS} PA et {MOVEMENT_POINTS} PM.")
+        log(f"[Combat Auto] Début du tour {CURRENT_TURN} avec {ACTION_POINTS} PA et {MOVEMENT_POINTS} PM.")
         current_pa = ACTION_POINTS
         current_pm = MOVEMENT_POINTS
         spell_casts = {}
@@ -340,40 +402,59 @@ def handle_fight_auto(gui_app=None):
         # --- Analyse du terrain ---
         if not combat_modes_checked:
             ensure_mode_is_on("Images/creature_mode_off.png", "Images/creature_mode_on.png", "Mode Créature")
+            if not ensure_mode_is_on("Images/creature_mode_off.png", "Images/creature_mode_on.png", "Mode Créature"):
+                log("[Combat Auto] Le mode créature n'a pas pu être activé. Passage du tour.")
+                pyautogui.press('f1')
+                time.sleep(2)
+                continue
             combat_modes_checked = True
-
         pyautogui.moveTo(100, 100, duration=0.1)
 
         log("[Combat Auto] Analyse du terrain pour ce tour...")
+        time.sleep(0.5)
         screenshot_pil = ImageGrab.grab(bbox=game_area)
-        screenshot_gray = cv2.cvtColor(np.array(screenshot_pil), cv2.COLOR_BGR2GRAY)
         grid_instance.map_obstacles(screenshot=screenshot_pil, color_tolerance=0)
         time.sleep(0.1)
         
-        combat_state.player_positions = find_entities_by_image(ALLY_TEMPLATES, screenshot_gray, y_compensation_factor=2.2)
-        combat_state.monster_positions = find_entities_by_image(ENEMY_TEMPLATES, screenshot_gray, y_compensation_factor=1.5)
+        player_positions_with_scores = find_entities_by_image(ALLY_TEMPLATES, screenshot_pil, y_compensation_factor=1.8)
+        combat_state.player_positions = [pos for pos, score in player_positions_with_scores]
         
-        if not combat_state.player_positions:
+        if not combat_state.player_positions and CURRENT_TURN == 1 and combat_state.initial_placement_pos:
+            log(f"[Combat Auto] Détection du joueur échouée, utilisation de la position de départ mémorisée : {combat_state.initial_placement_pos}")
+            combat_state.player_positions = [combat_state.initial_placement_pos]
+
+        monster_positions_with_scores = find_entities_by_image(ENEMY_TEMPLATES, screenshot_pil, y_compensation_factor=1.5, exclude_rect=(1190, 671, 1275, 701))
+        combat_state.monster_positions = [pos for pos, score in monster_positions_with_scores]
+
+        
+        if not combat_state.player_positions and is_my_turn(timeout=0.5):
             log("[Combat Auto] Impossible de localiser le joueur. Fin du tour forcée.")
             time.sleep(2)
             pyautogui.press('f1')
             continue
-        
+
         player_pos = combat_state.player_positions[0]
         if player_pos in combat_state.monster_positions:
             combat_state.monster_positions.remove(player_pos)
 
         if player_pos not in grid_instance.walkable_cells:
             grid_instance.walkable_cells.add(player_pos)
-        for monster_pos in combat_state.monster_positions:
-            if monster_pos not in grid_instance.los_transparent_cells:
-                grid_instance.los_transparent_cells.add(monster_pos)
+
+
         
         log(f"[Combat Auto] Joueur détecté à : {player_pos}")
         if not combat_state.monster_positions:
+            player_score_str = f"(Score: {player_positions_with_scores[0][1]:.2f})" if player_positions_with_scores else ""
+            log(f"[Combat Auto] Joueur détecté à : {player_pos} {player_score_str}")
+
             log("[Combat Auto] Plus aucun monstre détecté. Fin du combat probable.")
             break
-        log(f"[Combat Auto] {len(combat_state.monster_positions)} monstres détectés à : {combat_state.monster_positions}")
+        
+        monsters_log = []
+        for pos, score in monster_positions_with_scores:
+            monsters_log.append(f"{pos} (Score: {score:.2f})")
+        log(f"[Combat Auto] {len(combat_state.monster_positions)} monstres détectés à : [{', '.join(monsters_log)}]")
+
         
         if gui_app:
             log("[Combat Auto] Rafraîchissement de la grille de debug.")
@@ -386,117 +467,148 @@ def handle_fight_auto(gui_app=None):
                 log("[Combat Auto] Reprise après pause. Ré-évaluation de la situation.")
                 break
 
-            log("[Combat Auto] Ré-analyse du terrain avant l'action.")
-            screenshot_pil = ImageGrab.grab(bbox=game_area)
-            screenshot_gray = cv2.cvtColor(np.array(screenshot_pil), cv2.COLOR_BGR2GRAY)
-            grid_instance.map_obstacles(screenshot=screenshot_pil, color_tolerance=0)
-            time.sleep(0.05)
-
-            combat_state.player_positions = find_entities_by_image(ALLY_TEMPLATES, screenshot_gray, y_compensation_factor=2.2)
-            combat_state.monster_positions = find_entities_by_image(ENEMY_TEMPLATES, screenshot_gray, y_compensation_factor=1.5)
-            if not combat_state.player_positions:
-                log("[Combat Auto] Impossible de localiser le joueur après ré-analyse. Fin du tour forcée.")
-                pyautogui.press('f1')
-                break
-            player_pos = combat_state.player_positions[0]
-            if player_pos in combat_state.monster_positions:
-                combat_state.monster_positions.remove(player_pos)
-            
-            if player_pos not in grid_instance.walkable_cells:
-                grid_instance.walkable_cells.add(player_pos)
-            for monster_pos in combat_state.monster_positions:
-                if monster_pos not in grid_instance.los_transparent_cells:
-                    grid_instance.los_transparent_cells.add(monster_pos)
-
-            if gui_app: gui_app.after(0, gui_app.draw_map, True)
-
-            min_spell_cost = min((spell['cost'] for spell in SPELLS), default=float('inf'))
-            if current_pa < min_spell_cost and current_pm == 0:
-                log("[Combat Auto] PA/PM insuffisants pour toute action. Fin du tour.")
-                break
-
             target = get_closest_entity(player_pos, combat_state.monster_positions)
             if not target:
                 log("[Combat Auto] Plus de cibles après ré-analyse. Fin du tour.")
                 break
 
             action_taken = False
-            can_attack_from_current_pos = False
-            for spell in SPELLS:
-                if current_pa >= spell['cost'] and spell_casts.get(spell['name'], 0) < spell.get('casts_per_turn', 99):
-                    dist = grid_instance.get_distance(player_pos, target)
-                    in_range = spell['range_min'] <= dist <= spell['range_max']
-                    has_los = grid_instance.has_line_of_sight(player_pos, target)
+            best_attack_spell = None
 
-                    if in_range and has_los:
-                        can_attack_from_current_pos = True
-                        log(f"[Combat Auto] Lancement de '{spell['name']}' sur {target}.")
-                        keyboard.press_and_release(spell['key'])
-                        time.sleep(random.uniform(0.2, 0.5))
-                        pyautogui.click(grid_instance.cells[target])
-                        time.sleep(random.uniform(1.2, 1.5))
-                        current_pa -= spell['cost']
-                        action_taken = True
-                        spell_casts[spell['name']] = spell_casts.get(spell['name'], 0) + 1
-                        pyautogui.moveTo(100, 100, duration=0.1)
-                        if check_and_close_fight_end_popup():
-                            fight_over = True
+            # --- 1. Tenter d'attaquer depuis la position actuelle ---
+            if current_pa > 0:
+                for spell in SPELLS:
+                    if spell.get('is_movement'): continue
+
+                    casts_this_turn = spell_casts.get(spell['name'], 0)
+                    max_casts = spell.get('casts_per_turn', 99)
+                    if current_pa >= spell['cost'] and casts_this_turn < max_casts:
+                        dist = grid_instance.get_distance(player_pos, target)
+                        in_range = spell.get('range_min', 1) <= dist <= spell.get('range_max', 0)
+                        has_los = (not spell.get('requires_los', True)) or grid_instance.has_line_of_sight(player_pos, target)
+
+                        if in_range and has_los:
+                            best_attack_spell = spell
                             break
-                        new_monsters = find_entities_by_image(ENEMY_TEMPLATES, cv2.cvtColor(np.array(ImageGrab.grab(bbox=game_area)), cv2.COLOR_BGR2GRAY), y_compensation_factor=1.5)
-                        combat_state.monster_positions = new_monsters
-                        log(f"[Combat Auto] Ré-évaluation des monstres : {len(new_monsters)} restants.")
-                        if check_and_close_fight_end_popup(): break
-                        break
-                    else:
-                        log(f"[Debug] Sort '{spell['name']}': Portée? {'Oui' if in_range else 'Non'} (dist: {dist}, portée: {spell['range_min']}-{spell['range_max']}). LdV? {'Oui' if has_los else 'Non'}.")
-                else:
-                    pass
-            
+                        else:
+                            log(f"[Debug] Sort '{spell['name']}': Portée? {'Oui' if in_range else 'Non'} (dist: {dist}, portée: {spell.get('range_min', 1)}-{spell.get('range_max', 0)}). LdV? {'Oui' if has_los else 'Non'}. Lancers: {casts_this_turn}/{max_casts}.")
+                
+            if best_attack_spell:
+                log(f"[Combat Auto] Lancement de '{best_attack_spell['name']}' sur {target}.")
+                keyboard.press_and_release(best_attack_spell['key'])
+                time.sleep(random.uniform(0.2, 0.5))
+                pyautogui.click(grid_instance.cells[target])
+                time.sleep(random.uniform(1.2, 1.5))
+                current_pa -= best_attack_spell['cost']
+                action_taken = True
+                log(f"[Combat Auto] PA restants: {current_pa}, PM restants: {current_pm}")
+                spell_casts[best_attack_spell['name']] = spell_casts.get(best_attack_spell['name'], 0) + 1
+                time.sleep(1.0)
+                pyautogui.moveTo(100, 100, duration=0.1)
+                if check_and_close_fight_end_popup():
+                    fight_over = True
+                update_targets_after_action(game_area)
+
             if fight_over or check_and_close_fight_end_popup():
                 fight_over = True
                 break
 
             if action_taken: continue
 
-            if not can_attack_from_current_pos and current_pm > 0:
+            # --- 2. Tenter de se rapprocher si aucune attaque n'était possible ---
+            if not best_attack_spell and (current_pm > 0 or any(s.get('is_movement') for s in SPELLS)):
+                min_attack_cost = min((s.get('cost', 99) for s in SPELLS if not s.get('is_movement')), default=99)
+                if current_pa < min_attack_cost:
+                    log("[Combat Auto] Pas assez de PA pour attaquer après un déplacement. Fin du tour.")
+                    break
+
                 log("[Combat Auto] Aucune attaque possible. Tentative de rapprochement...")
 
-                log(f"[Debug Path] Position joueur: {player_pos} (marchable? {player_pos in grid_instance.walkable_cells})")
-                player_neighbors = grid_instance.get_neighbors(player_pos)
-                log(f"[Debug Path] Voisins marchables du joueur ({len(player_neighbors)}): {player_neighbors}")
-                log(f"[Debug Path] Position cible: {target} (marchable? {target in grid_instance.walkable_cells})")
-                log(f"[Debug Path] Cible transparente pour LdV? {target in grid_instance.los_transparent_cells}")
-                
-                path = grid_instance.find_path(player_pos, target)
+                # --- Logique de déplacement PM (prioritaire) ---
+                if current_pm > 0:
+                    log(f"[Debug Path] Position joueur: {player_pos} (marchable? {player_pos in grid_instance.walkable_cells})")
+                    player_neighbors = grid_instance.get_neighbors(player_pos)
+                    log(f"[Debug Path] Voisins marchables du joueur ({len(player_neighbors)}): {player_neighbors}")
+                    log(f"[Debug Path] Position cible: {target} (marchable? {target in grid_instance.walkable_cells})")
+                    log(f"[Debug Path] Cible transparente pour LdV? {target in grid_instance.los_transparent_cells}")
+                    
+                    path = grid_instance.find_path(player_pos, target)
 
-                log(f"[Debug Path] Chemin trouvé : {path}")
-                if path and len(path) > 1:
-                    move_target_cell = grid_instance.get_farthest_walkable_cell(path, current_pm)
-                    log(f"[Combat Auto] Déplacement de {player_pos} vers {move_target_cell} pour se mettre à portée.")
+                    log(f"[Debug Path] Chemin trouvé : {path}")
+                    if path and len(path) > 1:
+                        move_target_cell = grid_instance.get_farthest_walkable_cell(path, current_pm)
+                        
+                        dist_after_move = grid_instance.get_distance(move_target_cell, target)
+                        can_attack_after_pm_move = any(
+                            spell['range_min'] <= dist_after_move <= spell['range_max'] and not spell.get('is_movement')
+                            for spell in SPELLS
+                        )
 
-                    if move_target_cell in grid_instance.cells:
-                        pyautogui.click(grid_instance.cells[move_target_cell])
-                        time.sleep(random.uniform(2.0, 2.5))
+                        if can_attack_after_pm_move:
+                            log(f"[Combat Auto] Déplacement de {player_pos} vers {move_target_cell} pour se mettre à portée.")
 
-                        new_pos_list = find_entities_by_image(ALLY_TEMPLATES, cv2.cvtColor(np.array(ImageGrab.grab(bbox=game_area)), cv2.COLOR_BGR2GRAY), y_compensation_factor=2.2)
-                        new_pos = new_pos_list[0] if new_pos_list else player_pos
+                            if move_target_cell in grid_instance.cells:
+                                pyautogui.click(grid_instance.cells[move_target_cell])
+                                time.sleep(0.5)
+                                
+                                new_pos, move_success = verify_and_update_position(player_pos, move_target_cell, game_area, gui_app)
 
-                        if new_pos != player_pos:
-                            pm_used = grid_instance.get_path_distance(player_pos, new_pos)
-                            current_pm -= pm_used
-                            player_pos = new_pos
-                            log(f"[Combat Auto] Déplacement réussi vers {new_pos}.")
-                            action_taken = True
-                            continue
+                                if move_success:
+                                    pm_used = grid_instance.get_path_distance(player_pos, new_pos) # Calcule le coût en PM
+                                    current_pm -= pm_used
+                                    player_pos = new_pos
+                                    action_taken = True
+                                    continue
+                                else:
+                                    current_pm = 0
+                            else:
+                                log(f"[Combat Auto] Erreur: La case de destination {move_target_cell} est invalide.")
                         else:
-                            log("[Combat Auto] Le déplacement a échoué (personnage bloqué ou clic invalide).")
-                            current_pm = 0 
-                    else:
-                        log(f"[Combat Auto] Erreur: La case de destination {move_target_cell} est invalide.")
-                else:
-                    log("[Combat Auto] Aucun chemin trouvé vers la cible.")
+                            log("[Combat Auto] Déplacement PM insuffisant pour attaquer. Évaluation du sort de mouvement.")
 
-            if not action_taken or current_pa <= 0:
+                if not action_taken:
+                    if current_pa < movement_spell_cost:
+                        log(f"[Combat Auto] Pas assez de PA pour utiliser un sort de mouvement (coût: {movement_spell_cost}).")
+                        break
+
+                    # --- Logique de sort de Mouvement ---
+                    movement_spell = next((s for s in SPELLS if s.get('is_movement')), None)
+                    can_use_movement_spell = False
+                    if movement_spell:
+                        spell_name = movement_spell['name']
+                        cooldown = movement_spell.get('cooldown', 0)
+                        last_used = SPELL_COOLDOWNS.get(spell_name, -999)
+                        
+                        if current_pa >= movement_spell['cost'] and \
+                           spell_casts.get(spell_name, 0) < movement_spell.get('casts_per_turn', 99) and \
+                           CURRENT_TURN >= last_used + cooldown:
+                            can_use_movement_spell = True
+
+                    if can_use_movement_spell:
+                        log(f"[Combat Auto] Évaluation de l'utilisation de '{movement_spell['name']}' pour se rapprocher.")
+                        path_to_target = grid_instance.find_path(player_pos, target)
+                        if path_to_target:
+                            teleport_cell = grid_instance.get_farthest_walkable_cell(path_to_target, movement_spell['range_max'])
+                            if teleport_cell and grid_instance.get_distance(player_pos, teleport_cell) > current_pm:
+                                log(f"[Combat Auto] Lancement de '{movement_spell['name']}' vers la case {teleport_cell}.")
+                                keyboard.press_and_release(movement_spell['key'])
+                                time.sleep(random.uniform(0.2, 0.5))
+                                pyautogui.click(grid_instance.cells[teleport_cell])
+                                time.sleep(random.uniform(1.2, 1.5))
+                                current_pa -= movement_spell['cost']
+                                action_taken = True
+                                log(f"[Combat Auto] PA restants: {current_pa}, PM restants: {current_pm}")
+                                spell_casts[movement_spell['name']] = spell_casts.get(movement_spell['name'], 0) + 1
+                                SPELL_COOLDOWNS[movement_spell['name']] = CURRENT_TURN
+                                new_pos, move_success = verify_and_update_position(player_pos, teleport_cell, game_area, gui_app)
+                                if move_success:
+                                    player_pos = new_pos
+                                    action_taken = True
+                                    continue
+                
+                # --- Fin de la logique de Téléportation ---
+
+            if not action_taken:
                 log("[Combat Auto] Aucune action possible. Fin du tour.")
                 if not check_and_close_fight_end_popup():
                     time.sleep(2)
@@ -504,6 +616,7 @@ def handle_fight_auto(gui_app=None):
                     if end_turn_button_info:
                         log("[Combat Auto] Clic sur 'Passer son tour'.")
                         click_random_in_rect(*end_turn_button_info)
+                        wait_for_next_turn()
                     else:
                         log("[Combat Auto] Bouton 'Passer son tour' non trouvé, appui sur F1 en fallback.")
                         time.sleep(2)

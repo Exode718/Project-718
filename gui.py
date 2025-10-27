@@ -18,8 +18,12 @@ from fight import combat_state
 class GuiApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Dofus Assistant")
+        self.title("Goofy Assistant")
         self.geometry("565x375")
+        # --- Association de l'icône à l'application dans la barre des tâches Windows ---
+        myappid = 'goofy.assistant.bot'
+        windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        
         try:
             self.iconbitmap('icon.ico')
         except tk.TclError:
@@ -214,12 +218,16 @@ class GuiApp(tk.Tk):
         self.add_edit_map_button.grid(row=0, column=0, padx=5)
         ttk.Button(map_controls_frame, text="Rafraîchir", command=self.draw_map).grid(row=0, column=1, padx=5)
 
-        self.add_fish_spot_var = tk.BooleanVar()
-        self.add_fish_spot_check = ttk.Checkbutton(map_controls_frame, text="Ajouter Poisson", variable=self.add_fish_spot_var)
-        self.add_fish_spot_check.grid(row=0, column=2, padx=(10, 5), sticky='w')
+        self.add_resource_var = tk.BooleanVar()
+        self.add_resource_check = ttk.Checkbutton(map_controls_frame, text="+ Ressource", variable=self.add_resource_var, command=lambda: self.toggle_map_edit_mode('add'))
+        self.add_resource_check.grid(row=0, column=2, padx=(10, 5), sticky='w')
+
+        self.remove_resource_var = tk.BooleanVar()
+        self.remove_resource_check = ttk.Checkbutton(map_controls_frame, text="- Ressource", variable=self.remove_resource_var, command=lambda: self.toggle_map_edit_mode('remove'))
+        self.remove_resource_check.grid(row=0, column=3, padx=(5, 5), sticky='w')
 
         self.map_status_label = ttk.Label(map_controls_frame, text="Statut : Prêt", anchor='e')
-        self.map_status_label.grid(row=0, column=4, sticky='e', padx=5)
+        self.map_status_label.grid(row=0, column=5, sticky='e', padx=5)
 
         # --- Onglet: Combat ---
         combat_stats_frame = ttk.Frame(self.combat_tab)
@@ -244,21 +252,25 @@ class GuiApp(tk.Tk):
         ttk.Button(combat_control_frame, text="Modifier Sort", command=self.edit_spell).pack(side=tk.RIGHT, padx=5)
         ttk.Button(combat_control_frame, text="Ajouter Sort", command=self.add_spell).pack(side=tk.RIGHT, padx=5)
 
-        self.spells_tree = ttk.Treeview(self.combat_tab, columns=('name', 'key', 'cost', 'priority', 'range_min', 'range_max', 'casts_per_turn'), show='headings')
+        self.spells_tree = ttk.Treeview(self.combat_tab, columns=('name', 'key', 'cost', 'priority', 'range_min', 'range_max', 'casts_per_turn', 'movement', 'los'), show='headings')
         self.spells_tree.heading('name', text='Nom')
         self.spells_tree.heading('key', text='Touche')
         self.spells_tree.heading('cost', text='PA')
         self.spells_tree.heading('priority', text='Priorité')
-        self.spells_tree.heading('range_min', text='Portée Min')
-        self.spells_tree.heading('range_max', text='Portée Max')
-        self.spells_tree.heading('casts_per_turn', text='Lancers/tour')
-        self.spells_tree.column('name', width=120)
+        self.spells_tree.heading('range_min', text='PO Min')
+        self.spells_tree.heading('range_max', text='PO Max')
+        self.spells_tree.heading('casts_per_turn', text='Lancers')
+        self.spells_tree.heading('movement', text='Mouv.')
+        self.spells_tree.heading('los', text='LoS')
+        self.spells_tree.column('name', width=115)
         self.spells_tree.column('key', width=50, anchor='center')
-        self.spells_tree.column('cost', width=50, anchor='center')
-        self.spells_tree.column('priority', width=60, anchor='center')
-        self.spells_tree.column('range_min', width=70, anchor='center')
-        self.spells_tree.column('range_max', width=70, anchor='center')
-        self.spells_tree.column('casts_per_turn', width=80, anchor='center')
+        self.spells_tree.column('cost', width=25, anchor='center')
+        self.spells_tree.column('priority', width=50, anchor='center')
+        self.spells_tree.column('range_min', width=50, anchor='center')
+        self.spells_tree.column('range_max', width=50, anchor='center')
+        self.spells_tree.column('casts_per_turn', width=50, anchor='center')
+        self.spells_tree.column('movement', width=50, anchor='center')
+        self.spells_tree.column('los', width=50, anchor='center')
         self.spells_tree.pack(padx=5, pady=5, fill='both', expand=True)
 
         # --- Initialisation de l'état de l'application ---
@@ -273,6 +285,7 @@ class GuiApp(tk.Tk):
         self.reloading = False
         self.in_combat_view = False
         self.in_placement_phase = False
+        self.is_bot_running = False
 
         self.setup_global_hotkeys()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -305,6 +318,7 @@ class GuiApp(tk.Tk):
         self.update_status_labels("Statut : En cours...")
         set_stop_state(False)
         set_pause_state(False)
+        self.is_bot_running = True
         self.is_paused = False
 
         self.draw_map()
@@ -328,6 +342,7 @@ class GuiApp(tk.Tk):
         else:
             self.pause_button.config(text="Pause")
             self.update_status_labels("Statut : En cours...")
+            self.after(100, self.release_modifier_keys_after_hotkey)
             self.log_to_widget("[GUI] Reprise du script.")
 
     def reload_bot(self):
@@ -404,6 +419,7 @@ class GuiApp(tk.Tk):
         self.reload_button.config(state='disabled')
         self.log_to_widget("[GUI] Le bot est arrêté.")
         self.keyboard_listener_thread = None
+        self.is_bot_running = False
         if self.closing_on_stop:
             self.after(100, self.destroy)
         elif self.reloading:
@@ -638,12 +654,17 @@ class GuiApp(tk.Tk):
             self.log_to_widget(f"[Debug Clic] Case cliquée : {item_data}")
             return
 
-        if self.add_fish_spot_var.get():
-            self.add_fish_spot_on_click(tags)
+        if self.add_resource_var.get():
+            self.add_resource_on_click(tags)
+            return
+        
+        if self.remove_resource_var.get():
+            self.remove_resource_on_click(tags)
             return
 
         if self.selected_map_item:
-            self.draw_map() 
+            if self.selected_map_item != (item_type, item_data):
+                self.draw_map() 
 
         self.selected_map_item = (item_type, item_data)
         self.log_to_widget(f"[GUI] Sélectionné : {item_type} à la case {item_data}. Appuyez sur 'Suppr' pour effacer.")
@@ -655,7 +676,7 @@ class GuiApp(tk.Tk):
             if self.map_canvas.itemcget(item_id, "fill") != "":
                 self.map_canvas.itemconfig(item_id, fill="cyan")
 
-    def add_fish_spot_on_click(self, tags):
+    def add_resource_on_click(self, tags):
         _, item_data_str = tags
         grid_coord = tuple(map(int, item_data_str.strip('()').split(',')))
         
@@ -676,8 +697,39 @@ class GuiApp(tk.Tk):
         
         with open(f"Maps/{map_coords}.json", "w") as f:
             json.dump(map_data, f, indent=4)
-        self.log_to_widget(f"[GUI] Point de pêche ajouté à la case {grid_coord} sur la carte {map_coords}.")
+        self.log_to_widget(f"[GUI] Point de ressource ajouté à la case {grid_coord} sur la carte {map_coords}.")
         self.draw_map()
+
+    def remove_resource_on_click(self, tags):
+        item_type, item_data_str = tags
+        if item_type != "cell":
+            self.log_to_widget("[GUI] Clic sur un élément non-ressource. Action annulée.")
+            return
+
+        grid_coord = tuple(map(int, item_data_str.strip('()').split(',')))
+        map_coords = get_map_coordinates()
+        if not map_coords: return
+
+        try:
+            map_data = load_map_data(map_coords)
+            cells_to_keep = [c for c in map_data.get("cells", []) if grid_instance.get_cell_from_screen_coords(c['x'], c['y']) != grid_coord]
+            
+            if len(cells_to_keep) < len(map_data.get("cells", [])):
+                map_data["cells"] = cells_to_keep
+                with open(f"Maps/{map_coords}.json", "w") as f:
+                    json.dump(map_data, f, indent=4)
+                self.log_to_widget(f"[GUI] Point de ressource retiré de la case {grid_coord} sur la carte {map_coords}.")
+                self.draw_map()
+            else:
+                self.log_to_widget(f"[GUI] Aucune ressource trouvée à la case {grid_coord} pour la suppression.")
+        except FileNotFoundError:
+            self.log_to_widget(f"[GUI] Fichier de map introuvable pour {map_coords}.")
+
+    def toggle_map_edit_mode(self, mode):
+        if mode == 'add' and self.add_resource_var.get():
+            self.remove_resource_var.set(False)
+        elif mode == 'remove' and self.remove_resource_var.get():
+            self.add_resource_var.set(False)
 
     def calibrate_grid(self):
         def calibration_thread_target():
@@ -751,6 +803,8 @@ class GuiApp(tk.Tk):
         for item in self.spells_tree.get_children():
             self.spells_tree.delete(item)
         for spell in combat_config.get("SPELLS", []):
+            is_movement_str = "Oui" if spell.get('is_movement', False) else "Non"
+            requires_los_str = "Oui" if spell.get('requires_los', True) else "Non"
             self.spells_tree.insert('', 'end', values=(
                 spell.get('name', ''), 
                 spell.get('key', ''), 
@@ -758,7 +812,9 @@ class GuiApp(tk.Tk):
                 spell.get('priority', 99),
                 spell.get('range_min', 1),
                 spell.get('range_max', 8),
-                spell.get('casts_per_turn', 99)
+                spell.get('casts_per_turn', 99),
+                is_movement_str,
+                requires_los_str
             ))
 
     def save_settings(self):
@@ -806,6 +862,8 @@ class GuiApp(tk.Tk):
             spells = []
             for item_id in self.spells_tree.get_children():
                 values = self.spells_tree.item(item_id, 'values')
+                is_movement = True if values[7] == "Oui" else False
+                requires_los = True if values[8] == "Oui" else False
                 spells.append({
                     "name": values[0], 
                     "key": values[1], 
@@ -813,7 +871,10 @@ class GuiApp(tk.Tk):
                     "priority": int(values[3]),
                     "range_min": int(values[4]),
                     "range_max": int(values[5]),
-                    "casts_per_turn": int(values[6])})
+                    "casts_per_turn": int(values[6]),
+                    "is_movement": is_movement,
+                    "requires_los": requires_los
+                })
             combat_config["SPELLS"] = spells
             config["COMBAT"] = combat_config
 
@@ -857,6 +918,10 @@ class GuiApp(tk.Tk):
     def add_spell(self):
         win = tk.Toplevel(self)
         win.title("Ajouter un sort")
+        try:
+            win.iconbitmap('icon.ico')
+        except tk.TclError:
+            pass
         win.configure(bg='#2E2E2E')
         
         ttk.Label(win, text="Nom:").grid(row=0, column=0, padx=5, pady=5, sticky='w')
@@ -890,6 +955,12 @@ class GuiApp(tk.Tk):
         casts_per_turn_entry = ttk.Entry(win)
         casts_per_turn_entry.grid(row=6, column=1, padx=5, pady=5)
         casts_per_turn_entry.insert(0, "99")
+        
+        is_movement_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(win, text="Sort de Mouvement", variable=is_movement_var).grid(row=7, columnspan=2, padx=5, pady=2, sticky='w')
+
+        requires_los_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(win, text="Nécessite LoS", variable=requires_los_var).grid(row=8, columnspan=2, padx=5, pady=2, sticky='w')
 
         def on_add():
             name = name_entry.get()
@@ -899,10 +970,12 @@ class GuiApp(tk.Tk):
             range_min = range_min_entry.get()
             range_max = range_max_entry.get()
             casts_per_turn = casts_per_turn_entry.get()
+            is_movement = "Oui" if is_movement_var.get() else "Non"
+            requires_los = "Oui" if requires_los_var.get() else "Non"
 
             if name and key and cost and priority:
                 try:
-                    values = (name, key, int(cost), int(priority), int(range_min), int(range_max), int(casts_per_turn))
+                    values = (name, key, int(cost), int(priority), int(range_min), int(range_max), int(casts_per_turn), is_movement, requires_los)
                     self.spells_tree.insert('', 'end', values=values)
                     win.destroy()
                 except ValueError:
@@ -910,7 +983,7 @@ class GuiApp(tk.Tk):
             else:
                 messagebox.showwarning("Attention", "Veuillez remplir tous les champs.", parent=win)
 
-        ttk.Button(win, text="Ajouter", command=on_add).grid(row=7, columnspan=2, pady=10)
+        ttk.Button(win, text="Ajouter", command=on_add).grid(row=9, columnspan=2, pady=10)
 
     def edit_spell(self):
         selected_item = self.spells_tree.selection()
@@ -923,6 +996,10 @@ class GuiApp(tk.Tk):
 
         win = tk.Toplevel(self)
         win.title("Modifier un sort")
+        try:
+            win.iconbitmap('icon.ico')
+        except tk.TclError:
+            pass
         win.configure(bg='#2E2E2E')
 
         ttk.Label(win, text="Nom:").grid(row=0, column=0, padx=5, pady=5, sticky='w')
@@ -959,19 +1036,28 @@ class GuiApp(tk.Tk):
         casts_per_turn_entry = ttk.Entry(win)
         casts_per_turn_entry.grid(row=6, column=1, padx=5, pady=5)
         casts_per_turn_entry.insert(0, current_values[6])
+        
+        is_movement_var = tk.BooleanVar(value=(current_values[7] == "Oui"))
+        ttk.Checkbutton(win, text="Sort de Mouvement", variable=is_movement_var).grid(row=7, columnspan=2, padx=5, pady=2, sticky='w')
+
+        requires_los_var = tk.BooleanVar(value=(current_values[8] == "Oui"))
+        ttk.Checkbutton(win, text="Nécessite LoS", variable=requires_los_var).grid(row=8, columnspan=2, padx=5, pady=2, sticky='w')
 
         def on_save():
             try:
+                is_movement_str = "Oui" if is_movement_var.get() else "Non"
+                requires_los_str = "Oui" if requires_los_var.get() else "Non"
                 new_values = (
                     name_entry.get(), key_entry.get(), int(cost_entry.get()), int(priority_entry.get()),
-                    int(range_min_entry.get()), int(range_max_entry.get()), int(casts_per_turn_entry.get())
+                    int(range_min_entry.get()), int(range_max_entry.get()), int(casts_per_turn_entry.get()),
+                    is_movement_str, requires_los_str
                 )
                 self.spells_tree.item(item_id, values=new_values)
                 win.destroy()
             except ValueError:
                 messagebox.showerror("Erreur", "Les champs numériques (PA, priorité, etc.) doivent être des nombres.", parent=win)
 
-        ttk.Button(win, text="Sauvegarder", command=on_save).grid(row=7, columnspan=2, pady=10)
+        ttk.Button(win, text="Sauvegarder", command=on_save).grid(row=9, columnspan=2, pady=10)
 
 
     def remove_spell(self):
