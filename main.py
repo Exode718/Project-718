@@ -193,7 +193,6 @@ def wait_for_map_change(old_coords, timeout=10, check_interval=0.5):
     return False
 
 def perform_map_change(current_coords, map_data, direction, max_retries=3):
-    """Tente de changer de carte avec plusieurs essais."""
     final_direction = find_exit_with_fallback(map_data, direction)
     if not final_direction:
         log(f"[Trajet] Aucune sortie trouvée pour la direction '{direction}'.")

@@ -28,11 +28,11 @@ SPELLS.sort(key=lambda x: x.get('priority', 99))
 IMAGE_FOLDER = "Images"
 END_TURN_BUTTON_IMAGE = os.path.join(IMAGE_FOLDER, "button_end_turn.png")
 MY_TURN_INDICATOR_IMAGE = os.path.join(IMAGE_FOLDER, "my_turn_indicator.png")
-PLAYER_START_CELL_COLOR_RGB = (255, 0, 0)  # Rouge
-MONSTER_START_CELL_COLOR_RGB = (0, 0, 255) # Bleu
+PLAYER_START_CELL_COLOR_RGB = (255, 0, 0)
+MONSTER_START_CELL_COLOR_RGB = (0, 0, 255)
 ALLY_IMAGES = [os.path.join(IMAGE_FOLDER, f"ally{i}.png") for i in range(1, 5)]
 ENEMY_IMAGES = [os.path.join(IMAGE_FOLDER, f"enemy{i}.png") for i in range(1, 5)]
-SHADOW_RGB_COLOR = (56, 44, 22) # RGB for #382C16
+SHADOW_RGB_COLOR = (56, 44, 22)
 ALLY_TEMPLATES = [cv2.imread(p, 0) for p in ALLY_IMAGES if os.path.exists(p)]
 ENEMY_TEMPLATES = [cv2.imread(p, 0) for p in ENEMY_IMAGES if os.path.exists(p)]
 
@@ -78,7 +78,7 @@ def find_on_screen(template_path, threshold=0.8, bbox=None):
 def is_my_turn(timeout=2):
     start_time = time.time()
     while time.time() - start_time < timeout:
-        if find_on_screen(MY_TURN_INDICATOR_IMAGE, threshold=0.95): # Augmentation du seuil pour éviter les faux positifs
+        if find_on_screen(MY_TURN_INDICATOR_IMAGE, threshold=0.95):
             return True
         time.sleep(0.2)
     return False
@@ -95,23 +95,19 @@ def wait_for_next_turn(timeout=30):
     return False
 
 def ensure_mode_is_on(off_image, on_image, mode_name, retries=3, delay=0.5):
-    # 1. Vérifier si le mode est déjà activé
     if find_on_screen(on_image, threshold=0.9):
         log(f"[Combat Auto] {mode_name} est déjà activé.")
         return True
 
-    # 2. Tenter d'activer le mode si le bouton 'off' est trouvé
     for i in range(retries):
         off_button_pos = find_on_screen(off_image, threshold=0.9)
         if off_button_pos:
             log(f"[Combat Auto] {mode_name} est désactivé. Tentative d'activation ({i+1}/{retries})...")
             pyautogui.click(off_button_pos[0], off_button_pos[1])
             time.sleep(delay)
-            # Vérifier si l'activation a réussi
             if find_on_screen(on_image, threshold=0.9):
                 log(f"[Combat Auto] {mode_name} activé avec succès.")
                 return True
-        # Si le bouton 'off' n'est pas trouvé, ou si l'activation a échoué, on logue et on réessaye (si retries > 1)
         log(f"[Combat Auto] Impossible de trouver le bouton '{mode_name}' (off) ou l'activation a échoué. Ré-essai...")
 
     log(f"[Combat Auto] AVERTISSEMENT: Échec de l'activation de {mode_name} après {retries} tentatives. Le combat peut être instable.")
@@ -315,7 +311,6 @@ def handle_fight_auto(gui_app=None):
         log(f"[Combat Auto] {len(player_starts)} cases de départ alliées trouvées : {player_starts}")
         log(f"[Combat Auto] {len(monster_starts)} cases de départ ennemies trouvées : {monster_starts}")
 
-        # Détection des monstres en placement via la couleur de l'ombre sur les cases de départ
         detected_monsters = []
         for cell in monster_starts:
             screen_pos = grid_instance.cells.get(cell)
@@ -326,7 +321,6 @@ def handle_fight_auto(gui_app=None):
         combat_state.monster_positions = detected_monsters
         log(f"[Combat Auto] {len(combat_state.monster_positions)} monstres détectés sur les cases de départ : {combat_state.monster_positions}")
 
-        # Fallback si aucun monstre avec ombre n'est trouvé
         if not combat_state.monster_positions and monster_starts:
             log("[Combat Auto] Aucun monstre avec ombre détecté. Utilisation de toutes les cases de départ ennemies comme cibles potentielles.")
             combat_state.monster_positions = monster_starts
@@ -336,7 +330,7 @@ def handle_fight_auto(gui_app=None):
 
         if player_starts:
             current_player_pos_list = [p for p,s in find_entities_by_image(ALLY_TEMPLATES, screenshot, y_compensation_factor=1.8)]
-            current_player_pos = current_player_pos_list[0] if current_player_pos_list else None # On prend la première entité alliée trouvée
+            current_player_pos = current_player_pos_list[0] if current_player_pos_list else None
 
             best_cell = None
             min_dist_to_closest_monster = float('inf')
@@ -559,7 +553,7 @@ def handle_fight_auto(gui_app=None):
                                 new_pos, move_success = verify_and_update_position(player_pos, move_target_cell, game_area, gui_app)
 
                                 if move_success:
-                                    pm_used = grid_instance.get_path_distance(player_pos, new_pos) # Calcule le coût en PM
+                                    pm_used = grid_instance.get_path_distance(player_pos, new_pos)
                                     current_pm -= pm_used
                                     player_pos = new_pos
                                     action_taken = True
