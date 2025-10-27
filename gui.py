@@ -7,7 +7,6 @@ import queue
 import time
 import json
 import keyboard
-import keyboard # Keep this import for hotkeys
 from PIL import Image, ImageTk
 import os 
 from main import main_bot_logic, get_map_coordinates, load_map_data, create_map_interactively, find_exit_with_fallback, wait_for_map_change, get_next_map_coords
