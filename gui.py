@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import scrolledtext, messagebox, ttk
+from tkinter import scrolledtext, messagebox, ttk, font
 from ctypes import windll, byref, c_int 
 import pyautogui
 import threading
@@ -9,8 +9,8 @@ import json
 import keyboard
 from PIL import Image, ImageTk
 import os, sys, traceback
-from main import main_bot_logic, load_map_data, create_map_interactively, find_exit_with_fallback, wait_for_map_change, get_next_map_coords
-from utils import set_pause_state, set_stop_state, is_stop_requested, is_fight_started, get_map_coordinates, image_file_lock
+from main import main_bot_logic, load_map_data, create_map_interactively, find_exit_with_fallback, wait_for_map_change, get_next_map_coords 
+from utils import log, set_pause_state, set_stop_state, is_stop_requested, is_fight_started, get_map_coordinates, image_file_lock
 from grid import grid_instance
 from fight import combat_state
 
@@ -64,14 +64,17 @@ class GuiApp(tk.Tk):
         self.notebook.add(self.combat_tab, text='Combat')
         self.notebook.add(self.settings_tab, text='Configuration')
 
-        # --- Onglet: Bot ---
+        # --- Onglet: Bot ---        
+        self.info_label = ttk.Label(self.bot_tab, text="Coordonnées: N/A", anchor='w', font=("Consolas", 10))
+        self.info_label.pack(pady=(5,0), padx=5, fill='x')
+
         self.map_canvas = tk.Canvas(self.bot_tab, bg=light_grey_bg, highlightthickness=0)
         self.map_canvas.pack(pady=5, padx=5, fill='both', expand=True)
         self.map_canvas.bind("<KeyPress-Delete>", self.delete_selected_map_item)
         self.map_canvas.bind("<Button-3>", self.show_map_context_menu)
 
         map_controls_frame = ttk.Frame(self.bot_tab)
-        map_controls_frame.pack(pady=(0, 5), fill=tk.X, padx=5)
+        map_controls_frame.pack(pady=(2, 5), fill=tk.X, padx=5)
         map_controls_frame.columnconfigure(4, weight=1)
         self.add_edit_map_button = ttk.Button(map_controls_frame, text="Créer/Éditer Map", command=self.add_or_edit_map)
         self.add_edit_map_button.grid(row=0, column=0, padx=5)
@@ -79,7 +82,7 @@ class GuiApp(tk.Tk):
         self.toggle_grid_view_button = ttk.Button(map_controls_frame, text="Afficher Grille Combat", command=self.toggle_grid_view)
         self.toggle_grid_view_button.grid(row=0, column=2, padx=5)
 
-        self.log_widget = scrolledtext.ScrolledText(self.bot_tab, state='disabled', height=10, bg=light_grey_bg, fg=text_color, font=("Consolas", 9), relief='flat')
+        self.log_widget = scrolledtext.ScrolledText(self.bot_tab, state='disabled', height=10, bg=light_grey_bg, fg=text_color, font=("Consolas", 9), relief='flat', spacing1=0, spacing2=0, spacing3=0)
         self.log_widget.pack(pady=5, padx=5, fill=tk.BOTH, expand=True)
 
         control_frame = ttk.Frame(self.bot_tab)
@@ -288,7 +291,7 @@ class GuiApp(tk.Tk):
         if not isinstance(msg, str):
             msg = str(msg)
         msg = ''.join(c for c in msg if c.isprintable() or c in '\n\t')
-        self.log_queue.put(msg.strip() + '\n')
+        self.log_queue.put(msg)
 
     def process_log_queue(self):
         while not self.log_queue.empty():
@@ -331,7 +334,8 @@ class GuiApp(tk.Tk):
             try:
                 main_bot_logic(self, self.on_bot_finished)
             except Exception as e:
-                self.log_to_widget(f"ERREUR CRITIQUE INATTENDUE: {e}\n{traceback.format_exc()}")
+                sys.__stderr__.write(f"ERREUR CRITIQUE INATTENDUE: {e}\n{traceback.format_exc()}\n")
+                self.log_to_widget(f"ERREUR CRITIQUE INATTENDUE: {e}")
         self.bot_thread = threading.Thread(target=bot_thread_wrapper, daemon=True)
         self.bot_thread.start()
 
@@ -520,6 +524,8 @@ class GuiApp(tk.Tk):
         game_screenshot = None
 
         image_dir = os.path.join("Maps", "Images")
+        os.makedirs(image_dir, exist_ok=True)
+
         if coords:
             if self.in_combat_view or self.show_combat_grid:
                 tactic_path = os.path.join(image_dir, f"{coords}Tactic.png")
@@ -528,6 +534,14 @@ class GuiApp(tk.Tk):
                         game_screenshot = Image.open(tactic_path)
             else:
                 normal_path = os.path.join(image_dir, f"{coords}Normal.png")
+                if not os.path.exists(normal_path):
+                    # Si l'image normale n'existe pas, on la crée
+                    log(f"[GUI] Le fichier {normal_path} n'existe pas. Création automatique...")
+                    temp_screenshot = pyautogui.screenshot().crop(game_area)
+                    with image_file_lock:
+                        temp_screenshot.save(normal_path)
+                    game_screenshot = temp_screenshot
+                
                 with image_file_lock:
                     if os.path.exists(normal_path):
                         game_screenshot = Image.open(normal_path)
@@ -542,6 +556,13 @@ class GuiApp(tk.Tk):
         img_resized = game_screenshot.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
         self.map_bg_photo = ImageTk.PhotoImage(img_resized)
         self.map_canvas.create_image(canvas_width/2, canvas_height/2, image=self.map_bg_photo, anchor='center')
+        
+        info_text = f"Coordonnées: {coords if coords else 'N/A'}"
+        if self.in_combat_view:
+            pa = combat_state.current_pa if combat_state.current_pa is not None else '?'
+            pm = combat_state.current_pm if combat_state.current_pm is not None else '?'
+            info_text += f"  |  PA: {pa}  |  PM: {pm}"
+        self.info_label.config(text=info_text)
 
         self.update_map_button_text()
         map_data = {}
@@ -608,7 +629,7 @@ class GuiApp(tk.Tk):
                     if override_state == "walkable":
                         fill_color = "green"
                         stipple_pattern = "gray50"
-                    elif override_state == "obstacle":
+                    elif override_state == "obstacle": # Changement de couleur ici
                         fill_color = "red"
                         stipple_pattern = "gray50"
                     elif override_state == "los_transparent":
