@@ -1,0 +1,8 @@
+{
+    "map": "41,2",
+    "cells": [],
+    "exits": {},
+    "combat_overrides": {
+        "(-1, -2)": "obstacle"
+    }
+}

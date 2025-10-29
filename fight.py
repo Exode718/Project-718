@@ -215,8 +215,7 @@ def find_entities_by_image(templates, screenshot_pil, combat_overrides, threshol
         if grid_cell and combat_overrides.get(str(grid_cell)) != "obstacle":
             if is_shadow_present_on_cell(screenshot_pil, grid_cell, SHADOW_RGB_COLOR):
                 grid_positions.add((grid_cell, scores.get((center_x, center_y), 0)))
-            else:
-                log(f"[Debug Entité] Faux positif à {grid_cell}? Ombre non détectée (Score image: {scores.get((center_x, center_y), 0):.2f}).")
+
     return list(grid_positions)
 
 def get_start_cells_from_grid(screenshot):
@@ -275,13 +274,15 @@ def verify_and_update_position(old_pos, destination_cell, game_area, gui_app, co
     combat_state.player_positions = [old_pos]
     return old_pos, False
 
-def update_targets_after_action(game_area, combat_overrides):
+def update_targets_after_action(game_area, combat_overrides, gui_app):
     log("[Combat Auto] Ré-évaluation des cibles...")
     pyautogui.moveTo(100, 100, duration=0.1)
     screenshot = ImageGrab.grab(bbox=game_area)    
     monster_positions_with_scores = find_entities_by_image(ENEMY_TEMPLATES, screenshot, combat_overrides, y_compensation_factor=1.5, exclude_rect=(1190, 671, 1275, 701))
     combat_state.monster_positions = [p for p, s in monster_positions_with_scores]
     log(f"[Combat Auto] {len(combat_state.monster_positions)} cibles restantes.")
+    if gui_app: gui_app.after(0, gui_app.draw_map, True)
+
 class CombatState:
     def __init__(self):
         self.possible_player_starts = []
@@ -289,12 +290,16 @@ class CombatState:
         self.monster_positions = []
         self.player_positions = []
         self.initial_placement_pos = None
+        self.current_pa = None
+        self.current_pm = None
 
     def reset(self):
         self.possible_player_starts = []
         self.possible_monster_starts = []
         self.monster_positions = []
         self.initial_placement_pos = None
+        self.current_pa = None
+        self.current_pm = None
 
 combat_state = CombatState()
 
@@ -415,24 +420,28 @@ def handle_fight_auto(gui_app=None):
         if not pa_pos or not pm_pos:
             return ACTION_POINTS, MOVEMENT_POINTS
 
-        try:
-            screenshot = ImageGrab.grab()
-            
-            def ocr_zone(pos):
-                zone = (pos[0] - 20, pos[1] - 15, pos[0] + 20, pos[1] + 15)
-                img = screenshot.crop(zone)
-                img_gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-                img_thresh = cv2.threshold(img_gray, 200, 255, cv2.THRESH_BINARY_INV)[1]
-                text = pytesseract.image_to_string(img_thresh, config='--psm 7 -c tessedit_char_whitelist=0123456789')
-                return int(text.strip())
+        for attempt in range(3):
+            try:
+                screenshot = ImageGrab.grab()
+                
+                def ocr_zone(pos):
+                    zone = (pos[0] - 10, pos[1] - 10, pos[0] + 10, pos[1] + 10) # Zone réduite à 20x20
+                    img = screenshot.crop(zone)
+                    img_gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+                    img_thresh = cv2.threshold(img_gray, 200, 255, cv2.THRESH_BINARY_INV)[1]
+                    text = pytesseract.image_to_string(img_thresh, config='--psm 7 -c tessedit_char_whitelist=0123456789')
+                    return int(text.strip())
 
-            pa = ocr_zone(pa_pos)
-            pm = ocr_zone(pm_pos)
-            log(f"[OCR] PA lus: {pa}, PM lus: {pm}")
-            return pa, pm
-        except (ValueError, TypeError, pytesseract.TesseractError) as e:
-            log(f"[OCR] Erreur de lecture PA/PM: {e}. Utilisation des valeurs par défaut.")
-            return ACTION_POINTS, MOVEMENT_POINTS
+                pa = ocr_zone(pa_pos)
+                pm = ocr_zone(pm_pos)
+                log(f"[OCR] PA lus: {pa}, PM lus: {pm}")
+                return pa, pm
+            except (ValueError, TypeError, pytesseract.TesseractError) as e:
+                log(f"[OCR] Erreur de lecture PA/PM (essai {attempt+1}/3): {e}. Nouvel essai...")
+                time.sleep(0.2)
+        
+        log("[OCR] Échec de la lecture des PA/PM après plusieurs tentatives. Utilisation des valeurs par défaut.")
+        return ACTION_POINTS, MOVEMENT_POINTS
 
     game_area = (0, 24, 1348, 808)
 
@@ -453,6 +462,8 @@ def handle_fight_auto(gui_app=None):
         CURRENT_TURN += 1
         log("[Combat Auto] C'est notre tour !")
         current_pa, current_pm = read_ap_mp()
+        combat_state.current_pa = current_pa
+        combat_state.current_pm = current_pm
         log(f"[Combat Auto] Début du tour {CURRENT_TURN} avec {current_pa} PA et {current_pm} PM.")
         spell_casts = {}
 
@@ -564,8 +575,8 @@ def handle_fight_auto(gui_app=None):
                 pyautogui.moveTo(100, 100, duration=0.1)
                 if check_and_close_fight_end_popup():
                     fight_over = True
-                    combat_is_finished = True
-                update_targets_after_action(game_area, grid_instance.combat_overrides)
+                    combat_is_finished = True; break
+                update_targets_after_action(game_area, grid_instance.combat_overrides, gui_app)
 
             if fight_over or check_and_close_fight_end_popup():
                 fight_over = True
@@ -617,6 +628,8 @@ def handle_fight_auto(gui_app=None):
                                     current_pm -= pm_used
                                     player_pos = new_pos
                                     action_taken = True
+                                    if gui_app:
+                                        gui_app.after(0, gui_app.draw_map, True)
                                     continue
                                 else:
                                     current_pm = 0
@@ -654,6 +667,7 @@ def handle_fight_auto(gui_app=None):
                                 keyboard.press_and_release(movement_spell['key'])
                                 time.sleep(random.uniform(0.2, 0.5))
                                 pyautogui.click(grid_instance.cells[teleport_cell])
+                                time.sleep(1.5) # Pause pour l'animation de téléportation
                                 time.sleep(random.uniform(1.2, 1.5))
                                 current_pa -= movement_spell['cost']
                                 action_taken = True
@@ -663,6 +677,8 @@ def handle_fight_auto(gui_app=None):
                                 new_pos, move_success = verify_and_update_position(player_pos, teleport_cell, game_area, gui_app, grid_instance.combat_overrides)
                                 if move_success:
                                     player_pos = new_pos
+                                    if gui_app:
+                                        gui_app.after(0, gui_app.draw_map, True)
                                     action_taken = True
                                     continue
                 
