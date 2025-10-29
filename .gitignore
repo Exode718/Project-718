@@ -12,3 +12,6 @@ env/
 # IDE configuration folders
 .vscode/
 .idea/
+
+# Fichiers personnels à ne pas envoyer sur GitHub
+/Maps/Images/
