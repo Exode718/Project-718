@@ -1,5 +1,5 @@
 from fishing import run_fishing_cycle
-from utils import log, set_log_callback, is_stop_requested, check_for_pause, get_map_coordinates
+from utils import log, is_stop_requested, check_for_pause, get_map_coordinates, image_file_lock
 from fight import handle_fight, is_fight_started
 import pytesseract
 import os
@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 from PIL import ImageGrab
 import pyautogui
+import threading
 from tkinter import messagebox
 
 # --- Constantes ---
@@ -93,10 +94,11 @@ def create_map_interactively(map_coords, config, is_editing=False):
                 log("Capture du fond de la carte...")
                 game_area = (0, 24, 1348, 808)
                 image_dir = os.path.join(MAP_FOLDER, "Images")
-                os.makedirs(image_dir, exist_ok=True)
                 screenshot = ImageGrab.grab(bbox=game_area)
                 bg_path = os.path.join(image_dir, f"{map_coords}Normal.png")
-                screenshot.save(bg_path)
+                with image_file_lock:
+                    os.makedirs(image_dir, exist_ok=True)
+                    screenshot.save(bg_path)
                 log(f"Fond de carte sauvegardé sous : {bg_path}")
             else:
                 if key_name in exit_keys_map:
@@ -180,8 +182,6 @@ def perform_map_change(current_coords, map_data, direction, max_retries=3):
 
 def main_bot_logic(gui_app, finish_cb):
     # --- Logique principale du bot ---
-    set_log_callback(gui_app.log_to_widget)
-    
     with open("config.json", "r") as f:
         config = json.load(f)
 

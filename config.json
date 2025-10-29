@@ -7,16 +7,16 @@
     "FLOTTEUR_TIMEOUT": 16,
     "FLOTTEUR_CHECK_INTERVAL": 0.1,
     "KEYBINDS": {
-        "PAUSE_RESUME": "Ctrl droite+0",
-        "ADD_SPOT": "Ctrl droite+5",
-        "EXIT_UP_LEFT": "Ctrl droite+7",
-        "EXIT_UP": "Ctrl droite+8",
-        "EXIT_UP_RIGHT": "Ctrl droite+9",
-        "EXIT_LEFT": "Ctrl droite+4",
-        "EXIT_RIGHT": "Ctrl droite+6",
-        "EXIT_DOWN_LEFT": "Ctrl droite+1",
-        "EXIT_DOWN": "Ctrl droite+2",
-        "EXIT_DOWN_RIGHT": "Ctrl droite+3"
+        "PAUSE_RESUME": "0+Ctrl droite",
+        "ADD_SPOT": "5+Ctrl droite",
+        "EXIT_UP_LEFT": "7+Ctrl droite",
+        "EXIT_UP": "8+Ctrl droite",
+        "EXIT_UP_RIGHT": "9+Ctrl droite",
+        "EXIT_LEFT": "4+Ctrl droite",
+        "EXIT_RIGHT": "6+Ctrl droite",
+        "EXIT_DOWN_LEFT": "1+Ctrl droite",
+        "EXIT_DOWN": "2+Ctrl droite",
+        "EXIT_DOWN_RIGHT": "3+Ctrl droite"
     },
     "MAP_CREATION_KEYS": {},
     "COMBAT": {
@@ -125,8 +125,8 @@
             848
         ],
         "PM_OCR_POS": [
-            830,
-            849
+            827,
+            850
         ]
     }
 }

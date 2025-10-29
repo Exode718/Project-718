@@ -47,5 +47,9 @@
             "x": 723,
             "y": 50
         }
+    },
+    "combat_overrides": {
+        "(-12, -1)": "obstacle",
+        "(-14, 0)": "obstacle"
     }
 }

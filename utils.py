@@ -6,6 +6,7 @@ from datetime import datetime
 import pyautogui
 import pytesseract
 import re
+import threading
 
 
 # --- Constantes ---
@@ -14,6 +15,9 @@ RED_TOLERANCE = 0
 
 stop_requested = False
 is_paused = False
+
+# Verrou pour l'accès aux fichiers d'images de carte
+image_file_lock = threading.Lock()
 
 def set_pause_state(state: bool):
     global is_paused
@@ -33,18 +37,11 @@ def check_for_pause():
         time.sleep(0.1)
     return was_paused
 
-log_callback = None
-
 # --- Fonctions Utilitaires ---
-def set_log_callback(callback):
-    global log_callback
-    log_callback = callback
 
 def log(msg):
     formatted_msg = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
     print(formatted_msg)
-    if log_callback:
-        log_callback(formatted_msg)
 
 def get_map_coordinates_single_pass():
     # --- OCR pour les coordonnées de la carte ---

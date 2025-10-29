@@ -43,5 +43,24 @@
             "x": 626,
             "y": 785
         }
+    },
+    "combat_overrides": {
+        "(4, 8)": "los_transparent",
+        "(5, 8)": "los_transparent",
+        "(5, 7)": "los_transparent",
+        "(5, 5)": "los_transparent",
+        "(5, 6)": "los_transparent",
+        "(4, 5)": "los_transparent",
+        "(4, 6)": "los_transparent",
+        "(4, 7)": "los_transparent",
+        "(3, 9)": "los_transparent",
+        "(2, 9)": "los_transparent",
+        "(1, 9)": "los_transparent",
+        "(0, 8)": "los_transparent",
+        "(3, 7)": "los_transparent",
+        "(1, 7)": "los_transparent",
+        "(3, 8)": "obstacle",
+        "(2, 8)": "obstacle",
+        "(1, 8)": "obstacle"
     }
 }

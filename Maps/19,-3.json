@@ -1,0 +1,11 @@
+{
+    "map": "19,-3",
+    "cells": [],
+    "exits": {},
+    "combat_overrides": {
+        "(5, 8)": "los_transparent",
+        "(5, 7)": "los_transparent",
+        "(5, 5)": "los_transparent",
+        "(5, 6)": "los_transparent"
+    }
+}

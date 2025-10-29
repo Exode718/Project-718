@@ -8,10 +8,10 @@ import numpy as np
 import winsound
 import pyperclip
 import keyboard
-from PIL import ImageGrab
+from PIL import ImageGrab, Image
 import os
-
-from utils import log, is_fight_started, check_and_close_fight_end_popup, check_for_pause, is_stop_requested, get_map_coordinates
+import threading
+from utils import log, is_fight_started, check_and_close_fight_end_popup, check_for_pause, is_stop_requested, get_map_coordinates, image_file_lock
 from grid import grid_instance
 
 # --- Configuration Globale ---
@@ -138,6 +138,31 @@ def find_cells_by_color(target_color_rgb, tolerance=50, min_area=200, bbox=None)
     grid_positions = [grid_instance.get_cell_from_screen_coords(pos[0], pos[1]) for pos in screen_positions]
     return list(set(filter(None, grid_positions)))
 
+def is_monster_color_present_on_cell(screenshot_pil, grid_cell, colors_rgb, tolerance=20, radius=15, min_pixels=5):
+    screen_pos = grid_instance.cells.get(grid_cell)
+    if not screen_pos:
+        return False
+
+    game_area_x_offset, game_area_y_offset = 0, 24
+    x_center_rel = screen_pos[0] - game_area_x_offset
+    y_center_rel = screen_pos[1] - game_area_y_offset
+
+    pixel_count = 0
+    for x_offset in range(-radius, radius + 1):
+        for y_offset in range(-radius, radius + 1):
+            if x_offset**2 + y_offset**2 <= radius**2:
+                try:
+                    pixel = screenshot_pil.getpixel((x_center_rel + x_offset, y_center_rel + y_offset))
+                    for color_rgb in colors_rgb:
+                        if all(abs(pixel[i] - color_rgb[i]) <= tolerance for i in range(3)):
+                            pixel_count += 1
+                            if pixel_count >= min_pixels:
+                                return True
+                            break
+                except IndexError:
+                    continue
+    return False
+
 def is_shadow_present_on_cell(screenshot_pil, grid_cell, color_rgb, tolerance=20, radius=10, min_pixels=5):
     screen_pos = grid_instance.cells.get(grid_cell)
     if not screen_pos:
@@ -159,7 +184,7 @@ def is_shadow_present_on_cell(screenshot_pil, grid_cell, color_rgb, tolerance=20
                     continue
     return pixel_count >= min_pixels
 
-def find_entities_by_image(templates, screenshot_pil, threshold=0.8, y_compensation_factor=1.5, exclude_rect=None):
+def find_entities_by_image(templates, screenshot_pil, combat_overrides, threshold=0.8, y_compensation_factor=1.5, exclude_rect=None):
     if not templates:
         return []
 
@@ -187,7 +212,7 @@ def find_entities_by_image(templates, screenshot_pil, threshold=0.8, y_compensat
     for center_x, center_y in found_centers:
         anchor_x, anchor_y = center_x, center_y + int(30 * (y_compensation_factor - 1.0))
         grid_cell = grid_instance.get_cell_from_screen_coords(anchor_x, anchor_y)
-        if grid_cell:
+        if grid_cell and combat_overrides.get(str(grid_cell)) != "obstacle":
             if is_shadow_present_on_cell(screenshot_pil, grid_cell, SHADOW_RGB_COLOR):
                 grid_positions.add((grid_cell, scores.get((center_x, center_y), 0)))
             else:
@@ -225,21 +250,21 @@ def is_placement_cell_occupied(cell_coord, cell_color_rgb):
         log(f"[Combat Auto] Erreur lors de la vérification de l'occupation de la case {cell_coord}: {e}")
         return True
  
-def verify_and_update_position(old_pos, destination_cell, game_area, gui_app):
+def verify_and_update_position(old_pos, destination_cell, game_area, gui_app, combat_overrides):
     log("[Combat Auto] Vérification de la position après mouvement...")
     pyautogui.moveTo(100, 100, duration=0.1)
     
     for attempt in range(3):
         time.sleep(0.7)
         screenshot_after_move = ImageGrab.grab(bbox=game_area)
-        
+
         if is_shadow_present_on_cell(screenshot_after_move, destination_cell, SHADOW_RGB_COLOR):
             log(f"[Combat Auto] Déplacement réussi vers {destination_cell}.")
             combat_state.player_positions = [destination_cell]
             if gui_app: gui_app.after(0, gui_app.draw_map, True)
             return destination_cell, True
 
-        new_pos_list = [p for p, s in find_entities_by_image(ALLY_TEMPLATES, screenshot_after_move, y_compensation_factor=1.8)]
+        new_pos_list = [p for p, s in find_entities_by_image(ALLY_TEMPLATES, screenshot_after_move, combat_overrides, y_compensation_factor=1.8)]
         if new_pos_list and new_pos_list[0] != old_pos:
             log(f"[Combat Auto] Déplacement réussi vers {new_pos_list[0]} (détection globale).")
             combat_state.player_positions = [new_pos_list[0]]
@@ -250,11 +275,11 @@ def verify_and_update_position(old_pos, destination_cell, game_area, gui_app):
     combat_state.player_positions = [old_pos]
     return old_pos, False
 
-def update_targets_after_action(game_area):
+def update_targets_after_action(game_area, combat_overrides):
     log("[Combat Auto] Ré-évaluation des cibles...")
     pyautogui.moveTo(100, 100, duration=0.1)
     screenshot = ImageGrab.grab(bbox=game_area)    
-    monster_positions_with_scores = find_entities_by_image(ENEMY_TEMPLATES, screenshot, y_compensation_factor=1.5, exclude_rect=(1190, 671, 1275, 701))
+    monster_positions_with_scores = find_entities_by_image(ENEMY_TEMPLATES, screenshot, combat_overrides, y_compensation_factor=1.5, exclude_rect=(1190, 671, 1275, 701))
     combat_state.monster_positions = [p for p, s in monster_positions_with_scores]
     log(f"[Combat Auto] {len(combat_state.monster_positions)} cibles restantes.")
 class CombatState:
@@ -330,13 +355,14 @@ def handle_fight_auto(gui_app=None):
 
         if gui_app:
             gui_app.after(0, gui_app.draw_map, True)
-            image_dir = os.path.join("Maps", "Images")
-            os.makedirs(image_dir, exist_ok=True)
-            tactic_path = os.path.join(image_dir, f"{get_map_coordinates()}Tactic.png")
-            screenshot.save(tactic_path)
+            with image_file_lock:
+                image_dir = os.path.join("Maps", "Images")
+                os.makedirs(image_dir, exist_ok=True)
+                tactic_path = os.path.join(image_dir, f"{get_map_coordinates()}Tactic.png")
+                screenshot.save(tactic_path)
 
         if player_starts:
-            current_player_pos_list = [p for p,s in find_entities_by_image(ALLY_TEMPLATES, screenshot, y_compensation_factor=1.8)]
+            current_player_pos_list = [p for p,s in find_entities_by_image(ALLY_TEMPLATES, screenshot, {}, y_compensation_factor=1.8)]
             current_player_pos = current_player_pos_list[0] if current_player_pos_list else None
 
             best_cell = None
@@ -382,6 +408,7 @@ def handle_fight_auto(gui_app=None):
     if gui_app: gui_app.after(0, gui_app.draw_map, True)
 
     def read_ap_mp():
+        import pytesseract
         pa_pos = POSITIONS_CONFIG.get("PA_OCR_POS")
         pm_pos = POSITIONS_CONFIG.get("PM_OCR_POS")
         
@@ -446,14 +473,14 @@ def handle_fight_auto(gui_app=None):
         grid_instance.map_obstacles(screenshot=screenshot_pil, map_coords=current_map_coords)
         time.sleep(0.5)
         
-        player_positions_with_scores = find_entities_by_image(ALLY_TEMPLATES, screenshot_pil, y_compensation_factor=1.8)
+        player_positions_with_scores = find_entities_by_image(ALLY_TEMPLATES, screenshot_pil, grid_instance.combat_overrides, y_compensation_factor=1.8)
         combat_state.player_positions = [pos for pos, score in player_positions_with_scores]
         
         if not combat_state.player_positions and CURRENT_TURN == 1 and combat_state.initial_placement_pos:
             log(f"[Combat Auto] Détection du joueur échouée, utilisation de la position de départ mémorisée : {combat_state.initial_placement_pos}")
             combat_state.player_positions = [combat_state.initial_placement_pos]
 
-        monster_positions_with_scores = find_entities_by_image(ENEMY_TEMPLATES, screenshot_pil, y_compensation_factor=1.5, exclude_rect=(1190, 671, 1275, 701))
+        monster_positions_with_scores = find_entities_by_image(ENEMY_TEMPLATES, screenshot_pil, grid_instance.combat_overrides, y_compensation_factor=1.5, exclude_rect=(1190, 671, 1275, 701))
         combat_state.monster_positions = [pos for pos, score in monster_positions_with_scores]
 
         
@@ -538,7 +565,7 @@ def handle_fight_auto(gui_app=None):
                 if check_and_close_fight_end_popup():
                     fight_over = True
                     combat_is_finished = True
-                update_targets_after_action(game_area)
+                update_targets_after_action(game_area, grid_instance.combat_overrides)
 
             if fight_over or check_and_close_fight_end_popup():
                 fight_over = True
@@ -583,8 +610,8 @@ def handle_fight_auto(gui_app=None):
                                 pyautogui.click(grid_instance.cells[move_target_cell])
                                 time.sleep(0.5)
                                 
-                                new_pos, move_success = verify_and_update_position(player_pos, move_target_cell, game_area, gui_app)
-
+                                new_pos, move_success = verify_and_update_position(player_pos, move_target_cell, game_area, gui_app, grid_instance.combat_overrides)
+                                
                                 if move_success:
                                     pm_used = grid_instance.get_path_distance(player_pos, new_pos)
                                     current_pm -= pm_used
@@ -632,8 +659,8 @@ def handle_fight_auto(gui_app=None):
                                 action_taken = True
                                 log(f"[Combat Auto] PA restants: {current_pa}, PM restants: {current_pm}")
                                 spell_casts[movement_spell['name']] = spell_casts.get(movement_spell['name'], 0) + 1
-                                SPELL_COOLDOWNS[movement_spell['name']] = CURRENT_TURN
-                                new_pos, move_success = verify_and_update_position(player_pos, teleport_cell, game_area, gui_app)
+                                SPELL_COOLDOWNS[movement_spell['name']] = CURRENT_TURN                                
+                                new_pos, move_success = verify_and_update_position(player_pos, teleport_cell, game_area, gui_app, grid_instance.combat_overrides)
                                 if move_success:
                                     player_pos = new_pos
                                     action_taken = True
