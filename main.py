@@ -1,5 +1,5 @@
 from fishing import run_fishing_cycle
-from utils import log, set_log_callback, is_stop_requested, check_for_pause
+from utils import log, set_log_callback, is_stop_requested, check_for_pause, get_map_coordinates
 from fight import handle_fight, is_fight_started
 import pytesseract
 import os
@@ -15,37 +15,6 @@ from tkinter import messagebox
 # --- Constantes ---
 MAP_FOLDER = "Maps"
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-
-def get_map_coordinates_single_pass():
-    # --- OCR pour les coordonnées de la carte ---
-    screenshot = ImageGrab.grab()
-    crop_box = (0, 85, 300, 110)
-    cropped = screenshot.crop(crop_box)
-    try:
-        img = cv2.cvtColor(np.array(cropped), cv2.COLOR_RGB2GRAY)
-        img = cv2.threshold(img, 240, 255, cv2.THRESH_BINARY)[1]
-        text = pytesseract.image_to_string(img, config='--psm 6')
-        match = re.search(r'(-?\d+)\s*,\s*(-?\d+)', text)
-        if match:
-            x, y = match.groups()
-            return f"{x},{y}"
-    except Exception as e:
-        pass
-    return None
-
-def get_map_coordinates():
-    first_pass = get_map_coordinates_single_pass()
-    if not first_pass:
-        return None
-
-    time.sleep(0.25)
-    second_pass = get_map_coordinates_single_pass()
-
-    if first_pass == second_pass:
-        return first_pass
-    else:
-        log(f"Incohérence OCR : 1ère lecture='{first_pass}', 2ème lecture='{second_pass}'. Nouvel essai.")
-    return None
 
 def prompt_yes_no(message):
     return messagebox.askyesno("Création de map", message)
@@ -123,8 +92,10 @@ def create_map_interactively(map_coords, config, is_editing=False):
             elif key_name == key_save_bg:
                 log("Capture du fond de la carte...")
                 game_area = (0, 24, 1348, 808)
+                image_dir = os.path.join(MAP_FOLDER, "Images")
+                os.makedirs(image_dir, exist_ok=True)
                 screenshot = ImageGrab.grab(bbox=game_area)
-                bg_path = os.path.join(MAP_FOLDER, f"{map_coords}.png")
+                bg_path = os.path.join(image_dir, f"{map_coords}Normal.png")
                 screenshot.save(bg_path)
                 log(f"Fond de carte sauvegardé sous : {bg_path}")
             else:
@@ -207,13 +178,12 @@ def perform_map_change(current_coords, map_data, direction, max_retries=3):
         log(f"[Trajet] Le changement de map a échoué. Nouvel essai...")
     return False
 
-def main_bot_logic(log_cb, finish_cb):
+def main_bot_logic(gui_app, finish_cb):
     # --- Logique principale du bot ---
-    set_log_callback(log_cb)
+    set_log_callback(gui_app.log_to_widget)
     
     with open("config.json", "r") as f:
         config = json.load(f)
-    gui_app = log_cb.__self__
 
     visited_maps = set()
     previous_coords = None

@@ -11,7 +11,7 @@ import keyboard
 from PIL import ImageGrab
 import os
 
-from utils import log, is_fight_started, check_and_close_fight_end_popup, check_for_pause, is_stop_requested
+from utils import log, is_fight_started, check_and_close_fight_end_popup, check_for_pause, is_stop_requested, get_map_coordinates
 from grid import grid_instance
 
 # --- Configuration Globale ---
@@ -35,6 +35,7 @@ ENEMY_IMAGES = [os.path.join(IMAGE_FOLDER, f"enemy{i}.png") for i in range(1, 5)
 SHADOW_RGB_COLOR = (56, 44, 22)
 ALLY_TEMPLATES = [cv2.imread(p, 0) for p in ALLY_IMAGES if os.path.exists(p)]
 ENEMY_TEMPLATES = [cv2.imread(p, 0) for p in ENEMY_IMAGES if os.path.exists(p)]
+MONSTER_START_COLORS_RGB = [tuple(int(h[i:i+2], 16) for i in (0, 2, 4)) for h in COMBAT_CONFIG.get("MONSTER_COLORS_HEX", [])]
 
 SPELL_COOLDOWNS = {}
 CURRENT_TURN = 0
@@ -315,8 +316,10 @@ def handle_fight_auto(gui_app=None):
         for cell in monster_starts:
             screen_pos = grid_instance.cells.get(cell)
             if screen_pos:
-                pixel_rgb = screenshot.getpixel((screen_pos[0] - game_area[0], screen_pos[1] - game_area[1]))
-                if all(abs(pixel_rgb[i] - SHADOW_RGB_COLOR[i]) <= 20 for i in range(3)):
+                has_shadow = is_shadow_present_on_cell(screenshot, cell, SHADOW_RGB_COLOR)
+                has_monster_color = is_monster_color_present_on_cell(screenshot, cell, MONSTER_START_COLORS_RGB)
+
+                if has_shadow or has_monster_color:
                     detected_monsters.append(cell)
         combat_state.monster_positions = detected_monsters
         log(f"[Combat Auto] {len(combat_state.monster_positions)} monstres détectés sur les cases de départ : {combat_state.monster_positions}")
@@ -327,6 +330,10 @@ def handle_fight_auto(gui_app=None):
 
         if gui_app:
             gui_app.after(0, gui_app.draw_map, True)
+            image_dir = os.path.join("Maps", "Images")
+            os.makedirs(image_dir, exist_ok=True)
+            tactic_path = os.path.join(image_dir, f"{get_map_coordinates()}Tactic.png")
+            screenshot.save(tactic_path)
 
         if player_starts:
             current_player_pos_list = [p for p,s in find_entities_by_image(ALLY_TEMPLATES, screenshot, y_compensation_factor=1.8)]
@@ -374,6 +381,32 @@ def handle_fight_auto(gui_app=None):
     time.sleep(3)
     if gui_app: gui_app.after(0, gui_app.draw_map, True)
 
+    def read_ap_mp():
+        pa_pos = POSITIONS_CONFIG.get("PA_OCR_POS")
+        pm_pos = POSITIONS_CONFIG.get("PM_OCR_POS")
+        
+        if not pa_pos or not pm_pos:
+            return ACTION_POINTS, MOVEMENT_POINTS
+
+        try:
+            screenshot = ImageGrab.grab()
+            
+            def ocr_zone(pos):
+                zone = (pos[0] - 20, pos[1] - 15, pos[0] + 20, pos[1] + 15)
+                img = screenshot.crop(zone)
+                img_gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+                img_thresh = cv2.threshold(img_gray, 200, 255, cv2.THRESH_BINARY_INV)[1]
+                text = pytesseract.image_to_string(img_thresh, config='--psm 7 -c tessedit_char_whitelist=0123456789')
+                return int(text.strip())
+
+            pa = ocr_zone(pa_pos)
+            pm = ocr_zone(pm_pos)
+            log(f"[OCR] PA lus: {pa}, PM lus: {pm}")
+            return pa, pm
+        except (ValueError, TypeError, pytesseract.TesseractError) as e:
+            log(f"[OCR] Erreur de lecture PA/PM: {e}. Utilisation des valeurs par défaut.")
+            return ACTION_POINTS, MOVEMENT_POINTS
+
     game_area = (0, 24, 1348, 808)
 
     # --- Boucle principale de combat ---
@@ -392,9 +425,8 @@ def handle_fight_auto(gui_app=None):
 
         CURRENT_TURN += 1
         log("[Combat Auto] C'est notre tour !")
-        log(f"[Combat Auto] Début du tour {CURRENT_TURN} avec {ACTION_POINTS} PA et {MOVEMENT_POINTS} PM.")
-        current_pa = ACTION_POINTS
-        current_pm = MOVEMENT_POINTS
+        current_pa, current_pm = read_ap_mp()
+        log(f"[Combat Auto] Début du tour {CURRENT_TURN} avec {current_pa} PA et {current_pm} PM.")
         spell_casts = {}
 
         # --- Analyse du terrain ---
@@ -410,7 +442,8 @@ def handle_fight_auto(gui_app=None):
         log("[Combat Auto] Analyse du terrain pour ce tour...")
         time.sleep(0.5)
         screenshot_pil = ImageGrab.grab(bbox=game_area)
-        grid_instance.map_obstacles(screenshot=screenshot_pil, color_tolerance=0)
+        current_map_coords = get_map_coordinates()
+        grid_instance.map_obstacles(screenshot=screenshot_pil, map_coords=current_map_coords)
         time.sleep(0.5)
         
         player_positions_with_scores = find_entities_by_image(ALLY_TEMPLATES, screenshot_pil, y_compensation_factor=1.8)

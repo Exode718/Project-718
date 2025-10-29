@@ -1,9 +1,12 @@
 import time
 import numpy as np
 import cv2
-from PIL import ImageGrab
+from PIL import ImageGrab, Image
 from datetime import datetime
 import pyautogui
+import pytesseract
+import re
+
 
 # --- Constantes ---
 RED_RGB = (204, 0, 0)
@@ -42,6 +45,40 @@ def log(msg):
     print(formatted_msg)
     if log_callback:
         log_callback(formatted_msg)
+
+def get_map_coordinates_single_pass():
+    # --- OCR pour les coordonnées de la carte ---
+    screenshot = ImageGrab.grab()
+    crop_box = (0, 85, 300, 110)
+    cropped = screenshot.crop(crop_box)
+    try:
+        img = cv2.cvtColor(np.array(cropped), cv2.COLOR_RGB2GRAY)
+        img = cv2.threshold(img, 240, 255, cv2.THRESH_BINARY)[1]
+        text = pytesseract.image_to_string(img, config='--psm 6')
+        match = re.search(r'(-?\d+)\s*,\s*(-?\d+)', text)
+        if match:
+            x, y = match.groups()
+            return f"{x},{y}"
+    except Exception as e:
+        pass
+    return None
+
+def get_map_coordinates():
+    reads = []
+    for _ in range(3):
+        read = get_map_coordinates_single_pass()
+        if read:
+            reads.append(read)
+        time.sleep(0.1)
+    
+    if not reads:
+        return None
+
+    counts = {item: reads.count(item) for item in set(reads)}
+    if max(counts.values()) >= 2:
+        return max(counts, key=counts.get)
+    
+    return None
 
 def is_red_present(x, y, size=10, target_color=RED_RGB, tolerance=30, min_pixels=5):
     box = (x - size, y - size, x + size, y + size)

@@ -175,6 +175,19 @@ class Grid:
         self.walkable_cells.clear()
         self.los_transparent_cells.clear()
         
+        map_coords = kwargs.get('map_coords')
+        combat_overrides = {}
+        if map_coords:
+            try:
+                import json
+                map_path = os.path.join("Maps", f"{map_coords}.json")
+                if os.path.exists(map_path):
+                    with open(map_path, 'r') as f:
+                        map_data = json.load(f)
+                        combat_overrides = map_data.get("combat_overrides", {})
+            except Exception as e:
+                log(f"[Grille] Erreur au chargement des overrides: {e}")
+
         if screenshot is None:
             screenshot = pyautogui.screenshot()
         
@@ -223,6 +236,19 @@ class Grid:
             
             if hole_pixel_count >= 5:
                 self.los_transparent_cells.add(cell_coord)
+
+        if combat_overrides:
+            log(f"[Grille] Application de {len(combat_overrides)} remplacements de combat.")
+            for cell_str, state in combat_overrides.items():
+                cell_coord = tuple(map(int, cell_str.strip('()').split(',')))
+                if state == "walkable":
+                    self.walkable_cells.add(cell_coord)
+                    self.los_transparent_cells.add(cell_coord)
+                elif state == "obstacle":
+                    self.walkable_cells.discard(cell_coord)
+                    self.los_transparent_cells.discard(cell_coord)
+                elif state == "los_transparent":
+                    self.los_transparent_cells.add(cell_coord)
 
         log(f"[Grille] Cartographie terminée : {len(self.walkable_cells)} cases marchables trouvées.")
 

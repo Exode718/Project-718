@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import scrolledtext, messagebox, ttk
-from ctypes import windll, byref, c_int
+from ctypes import windll, byref, c_int 
 import pyautogui
 import threading
 import queue
@@ -8,9 +8,9 @@ import time
 import json
 import keyboard
 from PIL import Image, ImageTk
-import os 
-from main import main_bot_logic, get_map_coordinates, load_map_data, create_map_interactively, find_exit_with_fallback, wait_for_map_change, get_next_map_coords
-from utils import set_pause_state, set_stop_state, is_stop_requested, is_fight_started
+import os, sys
+from main import main_bot_logic, load_map_data, create_map_interactively, find_exit_with_fallback, wait_for_map_change, get_next_map_coords
+from utils import set_pause_state, set_stop_state, is_stop_requested, is_fight_started, get_map_coordinates
 from grid import grid_instance
 from fight import combat_state
 
@@ -19,7 +19,7 @@ class GuiApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Goofy Assistant")
-        self.geometry("565x375")
+        self.geometry("565x650")
         # --- Association de l'icône à l'application dans la barre des tâches Windows ---
         myappid = 'goofy.assistant.bot'
         windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
@@ -28,7 +28,7 @@ class GuiApp(tk.Tk):
             self.iconbitmap('icon.ico')
         except tk.TclError:
             print("[GUI] Fichier 'icon.ico' introuvable. L'icône par défaut est utilisée.")
-        self.resizable(False, False)
+        self.resizable(True, True)
         self.attributes('-topmost', True)
 
         self.style = ttk.Style(self)
@@ -60,17 +60,32 @@ class GuiApp(tk.Tk):
         self.bot_tab = ttk.Frame(self.notebook, style='TFrame')
         self.settings_tab = ttk.Frame(self.notebook, style='TFrame')
         self.combat_tab = ttk.Frame(self.notebook, style='TFrame')
-        self.map_tab = ttk.Frame(self.notebook, style='TFrame')
 
         self.notebook.add(self.bot_tab, text='Bot')
-        self.notebook.add(self.map_tab, text='Map')
         self.notebook.add(self.combat_tab, text='Combat')
         self.notebook.add(self.settings_tab, text='Configuration')
 
         # --- Onglet: Bot ---
+        self.map_canvas = tk.Canvas(self.bot_tab, bg=light_grey_bg, highlightthickness=0)
+        self.map_canvas.pack(pady=5, padx=5, fill='both', expand=True)
+        self.map_canvas.bind("<KeyPress-Delete>", self.delete_selected_map_item)
+        self.map_canvas.bind("<Button-3>", self.show_map_context_menu)
+
+        map_controls_frame = ttk.Frame(self.bot_tab)
+        map_controls_frame.pack(pady=(0, 5), fill=tk.X, padx=5)
+        map_controls_frame.columnconfigure(4, weight=1)
+        self.add_edit_map_button = ttk.Button(map_controls_frame, text="Créer/Éditer Map", command=self.add_or_edit_map)
+        self.add_edit_map_button.grid(row=0, column=0, padx=5)
+        ttk.Button(map_controls_frame, text="Rafraîchir", command=self.draw_map).grid(row=0, column=1, padx=5)
+        self.toggle_grid_view_button = ttk.Button(map_controls_frame, text="Afficher Grille Combat", command=self.toggle_grid_view)
+        self.toggle_grid_view_button.grid(row=0, column=2, padx=5)
+
+        self.log_widget = scrolledtext.ScrolledText(self.bot_tab, state='disabled', height=10, bg=light_grey_bg, fg=text_color, font=("Consolas", 9), relief='flat')
+        self.log_widget.pack(pady=5, padx=5, fill=tk.BOTH, expand=True)
+
         control_frame = ttk.Frame(self.bot_tab)
         control_frame.pack(side=tk.BOTTOM, pady=(4, 10), fill=tk.X, padx=5)
-        control_frame.columnconfigure(3, weight=1)
+        control_frame.columnconfigure(5, weight=1)
 
         self.start_button = ttk.Button(control_frame, text="Démarrer", command=self.start_bot)
         self.start_button.grid(row=0, column=0, padx=5)
@@ -88,12 +103,8 @@ class GuiApp(tk.Tk):
         self.auto_combat_var = tk.BooleanVar(value=True)
         self.auto_combat_check = ttk.Checkbutton(control_frame, text="Auto", variable=self.auto_combat_var)
         
-        control_frame.columnconfigure(5, weight=1)
         self.status_label = ttk.Label(control_frame, text="Statut : Prêt", anchor='e')
-        self.status_label.grid(row=0, column=5, sticky='e', padx=5)
-
-        self.log_widget = scrolledtext.ScrolledText(self.bot_tab, state='disabled', bg=light_grey_bg, fg=text_color, font=("Consolas", 9), relief='flat')
-        self.log_widget.pack(pady=5, padx=5, fill=tk.BOTH, expand=True)
+        self.status_label.grid(row=0, column=6, sticky='e', padx=5)
 
         # --- Widgets de l'onglet Configuration ---
         self.key_vars = {}
@@ -117,6 +128,8 @@ class GuiApp(tk.Tk):
             ("END_TURN_BUTTON_POS", "Pos. Bouton Fin de Tour"),
             ("FIGHT_END_CLOSE_POS", "Pos. Fermeture Fin Combat"),
             ("LEVEL_UP_OK_POS", "Pos. OK Métier/Niveau"),
+            ("PA_OCR_POS", "Pos. OCR PA"),
+            ("PM_OCR_POS", "Pos. OCR PM"),
         ]
         grid_definitions = [
             ("origin", "Point d'ancrage (x,y)"),
@@ -181,6 +194,14 @@ class GuiApp(tk.Tk):
         entry = ttk.Entry(frame, textvariable=var, width=30)
         entry.pack(side=tk.LEFT, padx=5, fill='x', expand=True)
         self.key_vars["WALKABLE_COLORS_HEX"] = (var, None)
+        
+        frame = ttk.Frame(scrollable_frame)
+        frame.pack(fill='x', padx=5, pady=2)
+        ttk.Label(frame, text="Couleurs Monstres (Hex):", width=25).pack(side=tk.LEFT)
+        var = tk.StringVar()
+        entry = ttk.Entry(frame, textvariable=var, width=30)
+        entry.pack(side=tk.LEFT, padx=5, fill='x', expand=True)
+        self.key_vars["MONSTER_COLORS_HEX"] = (var, None)
 
         ttk.Label(scrollable_frame, text="--- Divers ---", font=('calibri', 10, 'bold')).pack(fill='x', padx=5, pady=(10,2))
         self.debug_click_var = tk.BooleanVar()
@@ -197,31 +218,6 @@ class GuiApp(tk.Tk):
         
         self.save_settings_button = ttk.Button(config_control_frame, text="Sauvegarder", command=self.save_settings)
         self.save_settings_button.pack(side=tk.TOP, pady=2, fill=tk.X)
-
-        # --- Onglet: Map ---
-        self.map_canvas = tk.Canvas(self.map_tab, bg=light_grey_bg, highlightthickness=0)
-        self.map_canvas.pack(pady=5, padx=5, fill='both', expand=True)
-
-        self.map_canvas.bind("<KeyPress-Delete>", self.delete_selected_map_item)
-
-        map_controls_frame = ttk.Frame(self.map_tab)
-        map_controls_frame.pack(side=tk.BOTTOM, pady=(4, 10), fill=tk.X, padx=5)
-        map_controls_frame.columnconfigure(4, weight=1)
-
-        self.add_edit_map_button = ttk.Button(map_controls_frame, text="Créer/Éditer Map", command=self.add_or_edit_map)
-        self.add_edit_map_button.grid(row=0, column=0, padx=5)
-        ttk.Button(map_controls_frame, text="Rafraîchir", command=self.draw_map).grid(row=0, column=1, padx=5)
-
-        self.add_resource_var = tk.BooleanVar()
-        self.add_resource_check = ttk.Checkbutton(map_controls_frame, text="+ Ressource", variable=self.add_resource_var, command=lambda: self.toggle_map_edit_mode('add'))
-        self.add_resource_check.grid(row=0, column=2, padx=(10, 5), sticky='w')
-
-        self.remove_resource_var = tk.BooleanVar()
-        self.remove_resource_check = ttk.Checkbutton(map_controls_frame, text="- Ressource", variable=self.remove_resource_var, command=lambda: self.toggle_map_edit_mode('remove'))
-        self.remove_resource_check.grid(row=0, column=3, padx=(5, 5), sticky='w')
-
-        self.map_status_label = ttk.Label(map_controls_frame, text="Statut : Prêt", anchor='e')
-        self.map_status_label.grid(row=0, column=5, sticky='e', padx=5)
 
         # --- Onglet: Combat ---
         combat_stats_frame = ttk.Frame(self.combat_tab)
@@ -281,11 +277,18 @@ class GuiApp(tk.Tk):
         self.in_placement_phase = False
         self.is_bot_running = False
 
+        self.show_combat_grid = False
+        self.combat_screenshot = None
+
         self.setup_global_hotkeys()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.after(100, self.process_log_queue)
+        self.redirect_stdout()
 
     def log_to_widget(self, msg):
+        if not isinstance(msg, str):
+            msg = str(msg)
+        msg = ''.join(c for c in msg if c.isprintable() or c in '\n\t')
         self.log_queue.put(msg)
 
     def process_log_queue(self):
@@ -299,6 +302,20 @@ class GuiApp(tk.Tk):
 
         self.after(100, self.process_log_queue)
 
+    def redirect_stdout(self):
+        class StdoutRedirector:
+            def __init__(self, widget_log_func):
+                self.widget_log_func = widget_log_func
+                self.buffer = ''
+
+            def write(self, text):
+                self.widget_log_func(text)
+
+            def flush(self):
+                pass
+
+        sys.stdout = StdoutRedirector(self.log_to_widget)
+        sys.stderr = StdoutRedirector(self.log_to_widget)
     def start_bot(self):
         self.start_button.config(state='disabled')
         self.pause_button.config(state='normal', text="Pause")
@@ -311,14 +328,18 @@ class GuiApp(tk.Tk):
 
         self.draw_map()
 
-        self.bot_thread = threading.Thread(target=main_bot_logic, args=(self.log_to_widget, self.on_bot_finished), daemon=True)
+        def bot_thread_wrapper():
+            try:
+                main_bot_logic(self, self.on_bot_finished)
+            except Exception as e:
+                self.log_to_widget(f"ERREUR CRITIQUE INATTENDUE: {e}\n{traceback.format_exc()}")
+        self.bot_thread = threading.Thread(target=bot_thread_wrapper, daemon=True)
         self.bot_thread.start()
 
     def update_status_labels(self, text):
         self.status_label.config(text=text)
         self.status_label_config.config(text=text)
         self.status_label_combat.config(text=text)
-        self.map_status_label.config(text=text)
 
     def toggle_pause_bot(self):
         self.is_paused = not self.is_paused
@@ -479,10 +500,11 @@ class GuiApp(tk.Tk):
         self.add_edit_map_button.config(text=button_text)
 
     def draw_map(self, in_combat=None):
+        self.map_canvas.delete("all")
+
         if in_combat is not None:
             self.in_combat_view = in_combat
 
-        self.map_canvas.delete("all")
         canvas_width, canvas_height = self.map_canvas.winfo_width(), self.map_canvas.winfo_height()
 
         if canvas_width <= 1 or canvas_height <= 1:
@@ -494,21 +516,37 @@ class GuiApp(tk.Tk):
             self.update_map_button_text()
             return
         
-        full_screenshot = pyautogui.screenshot()
+        coords = get_map_coordinates()
         game_area = (0, 24, 1348, 808)
-        game_screenshot = full_screenshot.crop(game_area)
+        game_screenshot = None
+
+        image_dir = os.path.join("Maps", "Images")
+        if coords:
+            if self.in_combat_view or self.show_combat_grid:
+                tactic_path = os.path.join(image_dir, f"{coords}Tactic.png")
+                if os.path.exists(tactic_path):
+                    game_screenshot = Image.open(tactic_path)
+            else:
+                normal_path = os.path.join(image_dir, f"{coords}Normal.png")
+                if os.path.exists(normal_path):
+                    game_screenshot = Image.open(normal_path)
+
+        if game_screenshot is None:
+            full_screenshot = pyautogui.screenshot()
+            game_screenshot = full_screenshot.crop(game_area)
         
         scale = min(canvas_width / game_screenshot.width, canvas_height / game_screenshot.height)
         scaled_w, scaled_h = int(game_screenshot.width * scale), int(game_screenshot.height * scale)
         
         img_resized = game_screenshot.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
         self.map_bg_photo = ImageTk.PhotoImage(img_resized)
-        self.map_canvas.create_image(0, 0, image=self.map_bg_photo, anchor='nw')
+        self.map_canvas.create_image(canvas_width/2, canvas_height/2, image=self.map_bg_photo, anchor='center')
 
         self.update_map_button_text()
         map_data = {}
         fishing_spots_coords = set()
         exit_spots_coords = set()
+        
         if not self.in_combat_view:
             coords = get_map_coordinates()
             if coords:
@@ -526,24 +564,32 @@ class GuiApp(tk.Tk):
 
                 except FileNotFoundError:
                     pass
+        
+        coords = get_map_coordinates()
+        combat_overrides = {}
+        if coords:
+            try:
+                map_data_for_overrides = load_map_data(coords)
+                combat_overrides = map_data_for_overrides.get("combat_overrides", {})
+            except FileNotFoundError:
+                pass
 
         for cell_coord, screen_pos in grid_instance.cells.items():
             if game_area[0] <= screen_pos[0] < game_area[2] and game_area[1] <= screen_pos[1] < game_area[3]:
                 relative_x = screen_pos[0] - game_area[0]
                 relative_y = screen_pos[1] - game_area[1]
-                canvas_x = relative_x * scale
-                canvas_y = relative_y * scale
+                canvas_x = (relative_x * scale) + (canvas_width - scaled_w) / 2
+                canvas_y = (relative_y * scale) + (canvas_height - scaled_h) / 2
 
                 fill_color = ""
                 outline_color = "grey"
                 item_tags = ("cell", str(cell_coord))
 
-                if cell_coord in exit_spots_coords:
+                if cell_coord in exit_spots_coords and not (self.in_combat_view or self.show_combat_grid):
                     fill_color = "yellow"
                     item_tags = ("exit", str(cell_coord))
-                elif cell_coord in fishing_spots_coords:
+                elif cell_coord in fishing_spots_coords and not (self.in_combat_view or self.show_combat_grid):
                     fill_color = "orange"
-
                 if self.in_placement_phase:
                     if cell_coord in combat_state.possible_player_starts:
                         fill_color = "white"
@@ -553,8 +599,15 @@ class GuiApp(tk.Tk):
                         outline_color = "black" 
                     if cell_coord in combat_state.monster_positions:
                         fill_color = "darkred"
-                elif self.in_combat_view:
-                    if cell_coord in grid_instance.walkable_cells:
+                elif self.in_combat_view or self.show_combat_grid:
+                    override_state = combat_overrides.get(str(cell_coord))
+                    if override_state == "walkable":
+                        outline_color = "cyan"
+                    elif override_state == "obstacle":
+                        outline_color = "magenta"
+                    elif override_state == "los_transparent":
+                        outline_color = "yellow"
+                    elif cell_coord in grid_instance.walkable_cells:
                         outline_color = "lime"
                     elif cell_coord in grid_instance.los_transparent_cells:
                         outline_color = "orange"
@@ -564,7 +617,7 @@ class GuiApp(tk.Tk):
                         fill_color = "darkred"
                     elif cell_coord in combat_state.player_positions:
                         fill_color = "blue"
-                
+
                 width = 2 if self.in_placement_phase and (cell_coord in combat_state.possible_player_starts or cell_coord in combat_state.possible_monster_starts) else 1
                 cell_w, cell_h = 97 * scale, 50 * scale
                 points = [
@@ -574,15 +627,12 @@ class GuiApp(tk.Tk):
                     canvas_x - cell_w / 2, canvas_y
                 ]
                 item_type_tag = "cell"
-                if cell_coord in exit_spots_coords:
+                if cell_coord in exit_spots_coords and not (self.in_combat_view or self.show_combat_grid):
                     item_type_tag = "exit"
 
                 self.map_canvas.create_polygon(points, outline=outline_color, fill=fill_color, width=width, tags=(item_type_tag, str(cell_coord))) 
                 
-                clickable_item = self.map_canvas.create_polygon(points, outline="", fill="", tags=("clickable", str(cell_coord)))
-                self.map_canvas.tag_bind(clickable_item, "<Button-1>", lambda event, tags=(item_type_tag, str(cell_coord)): self.on_map_item_click(event, tags))
-
-
+                self.map_canvas.tag_bind(str(cell_coord), "<Button-1>", lambda event, tags=(item_type_tag, str(cell_coord)): self.on_map_item_click(event, tags))
 
     def highlight_spot(self, cell, color):
         grid_cell = grid_instance.get_cell_from_screen_coords(cell['x'], cell['y'])
@@ -600,14 +650,6 @@ class GuiApp(tk.Tk):
             self.log_to_widget(f"[Debug Clic] Case cliquée : {item_data}")
             return
 
-        if self.add_resource_var.get():
-            self.add_resource_on_click(tags)
-            return
-        
-        if self.remove_resource_var.get():
-            self.remove_resource_on_click(tags)
-            return
-
         if self.selected_map_item:
             if self.selected_map_item != (item_type, item_data):
                 self.draw_map() 
@@ -622,60 +664,94 @@ class GuiApp(tk.Tk):
             if self.map_canvas.itemcget(item_id, "fill") != "":
                 self.map_canvas.itemconfig(item_id, fill="cyan")
 
-    def add_resource_on_click(self, tags):
-        _, item_data_str = tags
-        grid_coord = tuple(map(int, item_data_str.strip('()').split(',')))
+    def show_map_context_menu(self, event):
+        clicked_items = self.map_canvas.find_overlapping(event.x, event.y, event.x, event.y)
+        cell_coord_str = None
+        for item in clicked_items:
+            tags = self.map_canvas.gettags(item)
+            for tag in tags:
+                if tag.startswith('('):
+                    cell_coord_str = tag
+                    break
+            if cell_coord_str:
+                break
         
-        map_coords = get_map_coordinates()
-        if not map_coords:
-            messagebox.showerror("Erreur", "Impossible de lire les coordonnées de la carte actuelle.")
+        if not cell_coord_str:
             return
 
+        grid_coord = tuple(map(int, cell_coord_str.strip('()').split(',')))
+
+        context_menu = tk.Menu(self, tearoff=0)
+        if self.in_combat_view or self.show_combat_grid:
+            context_menu.add_command(label="Forcer Marchable", command=lambda: self.set_combat_override(grid_coord, "walkable"))
+            context_menu.add_command(label="Forcer Obstacle", command=lambda: self.set_combat_override(grid_coord, "obstacle"))
+            context_menu.add_command(label="Forcer Ligne de Vue", command=lambda: self.set_combat_override(grid_coord, "los_transparent"))
+            context_menu.add_separator()
+            context_menu.add_command(label="Réinitialiser Case", command=lambda: self.set_combat_override(grid_coord, None))
+        else:
+            context_menu.add_command(label="Ajouter Ressource", command=lambda: self.add_resource_at_cell(grid_coord))
+            context_menu.add_command(label="Supprimer Ressource", command=lambda: self.remove_resource_at_cell(grid_coord))
+
+        context_menu.post(event.x_root, event.y_root)
+
+    def add_resource_at_cell(self, grid_coord):
+        map_coords = get_map_coordinates()
+        if not map_coords: return
         try:
             map_data = load_map_data(map_coords)
         except FileNotFoundError:
             map_data = {"map": map_coords, "cells": [], "exits": {}}
-
         screen_pos = grid_instance.cells.get(grid_coord)
         if not screen_pos: return
-
         map_data.setdefault("cells", []).append({"x": screen_pos[0], "y": screen_pos[1]})
-        
         with open(f"Maps/{map_coords}.json", "w") as f:
             json.dump(map_data, f, indent=4)
         self.log_to_widget(f"[GUI] Point de ressource ajouté à la case {grid_coord} sur la carte {map_coords}.")
         self.draw_map()
 
-    def remove_resource_on_click(self, tags):
-        item_type, item_data_str = tags
-        if item_type != "cell":
-            self.log_to_widget("[GUI] Clic sur un élément non-ressource. Action annulée.")
-            return
-
-        grid_coord = tuple(map(int, item_data_str.strip('()').split(',')))
+    def remove_resource_at_cell(self, grid_coord):
         map_coords = get_map_coordinates()
         if not map_coords: return
-
         try:
             map_data = load_map_data(map_coords)
             cells_to_keep = [c for c in map_data.get("cells", []) if grid_instance.get_cell_from_screen_coords(c['x'], c['y']) != grid_coord]
-            
             if len(cells_to_keep) < len(map_data.get("cells", [])):
                 map_data["cells"] = cells_to_keep
                 with open(f"Maps/{map_coords}.json", "w") as f:
                     json.dump(map_data, f, indent=4)
                 self.log_to_widget(f"[GUI] Point de ressource retiré de la case {grid_coord} sur la carte {map_coords}.")
                 self.draw_map()
-            else:
-                self.log_to_widget(f"[GUI] Aucune ressource trouvée à la case {grid_coord} pour la suppression.")
         except FileNotFoundError:
-            self.log_to_widget(f"[GUI] Fichier de map introuvable pour {map_coords}.")
+            pass
 
-    def toggle_map_edit_mode(self, mode):
-        if mode == 'add' and self.add_resource_var.get():
-            self.remove_resource_var.set(False)
-        elif mode == 'remove' and self.remove_resource_var.get():
-            self.add_resource_var.set(False)
+    def set_combat_override(self, grid_coord, state):
+        map_coords = get_map_coordinates()
+        if not map_coords: return
+        try:
+            map_data = load_map_data(map_coords)
+        except FileNotFoundError:
+            map_data = {"map": map_coords, "cells": [], "exits": {}}
+        
+        overrides = map_data.setdefault("combat_overrides", {})
+        if state is None:
+            if str(grid_coord) in overrides:
+                del overrides[str(grid_coord)]
+                self.log_to_widget(f"[Grille] Remplacement pour la case {grid_coord} retiré.")
+        else:
+            overrides[str(grid_coord)] = state
+            self.log_to_widget(f"[Grille] Case {grid_coord} forcée à l'état '{state}'.")
+
+        with open(f"Maps/{map_coords}.json", "w") as f:
+            json.dump(map_data, f, indent=4)
+        self.draw_map()
+
+    def toggle_grid_view(self):
+        self.show_combat_grid = not self.show_combat_grid
+        if self.show_combat_grid:
+            self.toggle_grid_view_button.config(text="Afficher Grille Pêche")
+        else:
+            self.toggle_grid_view_button.config(text="Afficher Grille Combat")
+        self.draw_map()
 
     def calibrate_grid(self):
         def calibration_thread_target():
@@ -741,6 +817,9 @@ class GuiApp(tk.Tk):
             elif key_id == "WALKABLE_COLORS_HEX":
                 hex_colors = combat_config.get("WALKABLE_COLORS_HEX", [])
                 var.set(', '.join(hex_colors))
+            elif key_id == "MONSTER_COLORS_HEX":
+                hex_colors = combat_config.get("MONSTER_COLORS_HEX", [])
+                var.set(', '.join(hex_colors))
             else:
                 var.set(keybinds_config.get(key_id) or map_keys_config.get(key_id, ''))
 
@@ -791,6 +870,9 @@ class GuiApp(tk.Tk):
                 elif key_id == "WALKABLE_COLORS_HEX":
                     hex_colors = [c.strip().upper().replace('#', '') for c in value.split(',') if c.strip()]
                     combat_config["WALKABLE_COLORS_HEX"] = hex_colors
+                elif key_id == "MONSTER_COLORS_HEX":
+                    hex_colors = [c.strip().upper().replace('#', '') for c in value.split(',') if c.strip()]
+                    combat_config["MONSTER_COLORS_HEX"] = hex_colors
                 elif key_id in self.key_vars and self.key_vars[key_id][1] and "Pos" not in self.key_vars[key_id][1].cget("text"):
                     keybinds_config[key_id] = self._format_hotkey_for_save(value) 
                 else:
