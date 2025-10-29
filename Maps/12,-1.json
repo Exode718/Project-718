@@ -51,5 +51,14 @@
             "x": 1299,
             "y": 97
         }
+    },
+    "combat_overrides": {
+        "(-3, 10)": "los_transparent",
+        "(-3, 9)": "los_transparent",
+        "(-3, 8)": "los_transparent",
+        "(-2, 7)": "los_transparent",
+        "(-1, 8)": "obstacle",
+        "(4, 10)": "obstacle",
+        "(-1, -1)": "walkable"
     }
 }

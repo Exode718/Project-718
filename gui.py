@@ -8,12 +8,11 @@ import time
 import json
 import keyboard
 from PIL import Image, ImageTk
-import os, sys
+import os, sys, traceback
 from main import main_bot_logic, load_map_data, create_map_interactively, find_exit_with_fallback, wait_for_map_change, get_next_map_coords
-from utils import set_pause_state, set_stop_state, is_stop_requested, is_fight_started, get_map_coordinates
+from utils import set_pause_state, set_stop_state, is_stop_requested, is_fight_started, get_map_coordinates, image_file_lock
 from grid import grid_instance
 from fight import combat_state
-
 
 class GuiApp(tk.Tk):
     def __init__(self):
@@ -289,14 +288,14 @@ class GuiApp(tk.Tk):
         if not isinstance(msg, str):
             msg = str(msg)
         msg = ''.join(c for c in msg if c.isprintable() or c in '\n\t')
-        self.log_queue.put(msg)
+        self.log_queue.put(msg.strip() + '\n')
 
     def process_log_queue(self):
         while not self.log_queue.empty():
             msg = self.log_queue.get_nowait()
 
             self.log_widget.config(state='normal')
-            self.log_widget.insert(tk.END, msg + '\n')
+            self.log_widget.insert(tk.END, msg)
             self.log_widget.config(state='disabled')
             self.log_widget.see(tk.END)
 
@@ -524,12 +523,14 @@ class GuiApp(tk.Tk):
         if coords:
             if self.in_combat_view or self.show_combat_grid:
                 tactic_path = os.path.join(image_dir, f"{coords}Tactic.png")
-                if os.path.exists(tactic_path):
-                    game_screenshot = Image.open(tactic_path)
+                with image_file_lock:
+                    if os.path.exists(tactic_path):
+                        game_screenshot = Image.open(tactic_path)
             else:
                 normal_path = os.path.join(image_dir, f"{coords}Normal.png")
-                if os.path.exists(normal_path):
-                    game_screenshot = Image.open(normal_path)
+                with image_file_lock:
+                    if os.path.exists(normal_path):
+                        game_screenshot = Image.open(normal_path)
 
         if game_screenshot is None:
             full_screenshot = pyautogui.screenshot()
@@ -582,14 +583,16 @@ class GuiApp(tk.Tk):
                 canvas_y = (relative_y * scale) + (canvas_height - scaled_h) / 2
 
                 fill_color = ""
+                stipple_pattern = ""
                 outline_color = "grey"
                 item_tags = ("cell", str(cell_coord))
 
                 if cell_coord in exit_spots_coords and not (self.in_combat_view or self.show_combat_grid):
                     fill_color = "yellow"
-                    item_tags = ("exit", str(cell_coord))
+                    stipple_pattern = "gray50"
                 elif cell_coord in fishing_spots_coords and not (self.in_combat_view or self.show_combat_grid):
                     fill_color = "orange"
+                    stipple_pattern = "gray50"
                 if self.in_placement_phase:
                     if cell_coord in combat_state.possible_player_starts:
                         fill_color = "white"
@@ -599,14 +602,18 @@ class GuiApp(tk.Tk):
                         outline_color = "black" 
                     if cell_coord in combat_state.monster_positions:
                         fill_color = "darkred"
+                        stipple_pattern = "gray50"
                 elif self.in_combat_view or self.show_combat_grid:
                     override_state = combat_overrides.get(str(cell_coord))
                     if override_state == "walkable":
-                        outline_color = "cyan"
+                        fill_color = "green"
+                        stipple_pattern = "gray50"
                     elif override_state == "obstacle":
-                        outline_color = "magenta"
+                        fill_color = "red"
+                        stipple_pattern = "gray50"
                     elif override_state == "los_transparent":
-                        outline_color = "yellow"
+                        fill_color = "orange"
+                        stipple_pattern = "gray50"
                     elif cell_coord in grid_instance.walkable_cells:
                         outline_color = "lime"
                     elif cell_coord in grid_instance.los_transparent_cells:
@@ -615,8 +622,10 @@ class GuiApp(tk.Tk):
                         outline_color = "red"
                     if cell_coord in combat_state.monster_positions:
                         fill_color = "darkred"
+                        stipple_pattern = "gray50"
                     elif cell_coord in combat_state.player_positions:
                         fill_color = "blue"
+                        stipple_pattern = "gray50"
 
                 width = 2 if self.in_placement_phase and (cell_coord in combat_state.possible_player_starts or cell_coord in combat_state.possible_monster_starts) else 1
                 cell_w, cell_h = 97 * scale, 50 * scale
@@ -630,7 +639,7 @@ class GuiApp(tk.Tk):
                 if cell_coord in exit_spots_coords and not (self.in_combat_view or self.show_combat_grid):
                     item_type_tag = "exit"
 
-                self.map_canvas.create_polygon(points, outline=outline_color, fill=fill_color, width=width, tags=(item_type_tag, str(cell_coord))) 
+                self.map_canvas.create_polygon(points, outline=outline_color, fill=fill_color, width=width, stipple=stipple_pattern, tags=(item_type_tag, str(cell_coord))) 
                 
                 self.map_canvas.tag_bind(str(cell_coord), "<Button-1>", lambda event, tags=(item_type_tag, str(cell_coord)): self.on_map_item_click(event, tags))
 

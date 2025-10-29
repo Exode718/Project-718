@@ -20,6 +20,7 @@ class Grid:
         self.walkable_cells = set()
         self.los_transparent_cells = set()
         self.walkable_cell_colors_rgb = []
+        self.combat_overrides = {}
         self.load_config()
 
     def load_config(self):
@@ -176,7 +177,7 @@ class Grid:
         self.los_transparent_cells.clear()
         
         map_coords = kwargs.get('map_coords')
-        combat_overrides = {}
+        self.combat_overrides = {}
         if map_coords:
             try:
                 import json
@@ -184,7 +185,7 @@ class Grid:
                 if os.path.exists(map_path):
                     with open(map_path, 'r') as f:
                         map_data = json.load(f)
-                        combat_overrides = map_data.get("combat_overrides", {})
+                        self.combat_overrides = map_data.get("combat_overrides", {})
             except Exception as e:
                 log(f"[Grille] Erreur au chargement des overrides: {e}")
 
@@ -237,9 +238,9 @@ class Grid:
             if hole_pixel_count >= 5:
                 self.los_transparent_cells.add(cell_coord)
 
-        if combat_overrides:
-            log(f"[Grille] Application de {len(combat_overrides)} remplacements de combat.")
-            for cell_str, state in combat_overrides.items():
+        if self.combat_overrides:
+            log(f"[Grille] Application de {len(self.combat_overrides)} remplacements de combat.")
+            for cell_str, state in self.combat_overrides.items():
                 cell_coord = tuple(map(int, cell_str.strip('()').split(',')))
                 if state == "walkable":
                     self.walkable_cells.add(cell_coord)
